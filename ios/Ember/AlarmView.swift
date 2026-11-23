@@ -22,6 +22,7 @@ struct AlarmView: View {
                     }
                     .padding(.top, 12)
 
+                    ActiveAlertsStrip(hiding: .alarm)
                     if car.status.alarmTriggered { triggeredCard }
                     securityCard
                     panicCard
@@ -86,12 +87,20 @@ struct AlarmView: View {
             }
         }()
         return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 46, height: 46)
-                    .background(tint.opacity(0.15), in: Circle())
+            HStack(spacing: 16) {
+                CarTopView(lowTires: [false, false, false, false],
+                           hazards: car.status.hazardsOn,
+                           panic: car.status.panicOn,
+                           alarmGlow: car.status.alarmTriggered)
+                    .frame(width: 56, height: 112)
+                    .overlay(alignment: .bottomTrailing) {
+                        Image(systemName: icon)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(tint)
+                            .frame(width: 30, height: 30)
+                            .glass(Circle(), tint: tint.opacity(0.25))
+                            .offset(x: 10, y: 4)
+                    }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.headline)
                     Text(subtitle).font(.subheadline).foregroundStyle(.secondary)

@@ -24,6 +24,8 @@ struct HazardsView: View {
                     }
                     .padding(.top, 12)
 
+                    ActiveAlertsStrip(hiding: .hazards)
+
                     HazardButton(on: on, busy: busy, enabled: ready) {
                         Haptics.tap()
                         car.perform(on ? .hazardsOff : .hazardsOn)
@@ -51,6 +53,24 @@ struct HazardsView: View {
                         .buttonStyle(.plain)
                         .disabled(!ready)
                     }
+
+                    // The car, with its corner lights blinking while the hazards are on.
+                    HStack(spacing: 18) {
+                        CarTopView(lowTires: [false, false, false, false],
+                                   hazards: on, panic: car.status.panicOn, alarmGlow: false)
+                            .frame(width: 64, height: 128)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(on ? "Corner lights flashing" : "Corner lights off")
+                                .font(.headline)
+                                .foregroundStyle(on ? Color.orange : Color.primary)
+                            Text(on ? "All four turn signals blink together, front and back."
+                                    : "Turning the hazards on blinks all four turn signals.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(18)
+                    .glassCard(24, tint: on ? Color.orange.opacity(0.18) : nil)
 
                     VStack(alignment: .leading, spacing: 10) {
                         Label("When to use them", systemImage: "info.circle").font(.headline)

@@ -10,6 +10,8 @@ struct Banner: Identifiable, Equatable {
     let kind: Kind
 }
 
+enum AppTab: Hashable { case remote, vehicle, hazards, alarm }
+
 /// The app's single source of truth: link state, car status, and commands.
 @MainActor
 final class CarController: ObservableObject {
@@ -21,6 +23,7 @@ final class CarController: ObservableObject {
     @Published private(set) var pending: CarCommand?
     @Published private(set) var hasKey = SecretStore.load() != nil
     @Published var banner: Banner?
+    @Published var selectedTab: AppTab = .remote
 
     @Published var demoMode: Bool {
         didSet {

@@ -13,11 +13,15 @@ struct VehicleView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     header
+                    ActiveAlertsStrip()
                     FuelCard(percent: car.vehicle.fuelPercent,
                              ageMinutes: car.vehicle.fuelAgeMinutes,
                              connected: car.link.isUsable)
                     TireCard(psi: car.vehicle.tiresPSI,
-                             ageMinutes: car.vehicle.tiresAgeMinutes)
+                             ageMinutes: car.vehicle.tiresAgeMinutes,
+                             hazards: car.status.hazardsOn,
+                             panic: car.status.panicOn,
+                             alarm: car.status.alarmTriggered)
                     if car.demoMode {
                         Label("Demo mode shows sample readings.", systemImage: "sparkles")
                             .font(.footnote)
@@ -138,6 +142,9 @@ struct TireCard: View {
     /// Front-left, front-right, rear-left, rear-right.
     let psi: [Double]?
     let ageMinutes: Int?
+    var hazards = false
+    var panic = false
+    var alarm = false
 
     /// Below this, a tire is flagged. Your exact pressure is on the driver's door-frame sticker.
     private let lowPSI = 30.0
@@ -166,7 +173,7 @@ struct TireCard: View {
                     TireReading(label: "Front left", value: psi?[0], low: lowPSI)
                     TireReading(label: "Rear left", value: psi?[2], low: lowPSI)
                 }
-                CarTopView(lowTires: lowFlags)
+                CarTopView(lowTires: lowFlags, hazards: hazards, panic: panic, alarmGlow: alarm)
                     .frame(width: 92, height: 184)
                 VStack(spacing: 46) {
                     TireReading(label: "Front right", value: psi?[1], low: lowPSI)
@@ -221,12 +228,40 @@ struct TireReading: View {
 
 /// Modern top-down car: curved body, panoramic glass roof, light bars,
 /// mirrors and four wheels. Low tires glow orange.
+/// While active, it also shows: hazards (all four corner lights blink amber),
+/// panic (head/tail lights flash and sound waves come from the horn), and
+/// alarm (a red glow pulses around the car).
 /// Drawn on a 100 x 200 grid that scales to whatever frame it's given.
 struct CarTopView: View {
     let lowTires: [Bool]   // FL, FR, RL, RR
+    var hazards = false
+    var panic = false
+    var alarmGlow = false
+
+    private static let blinkInterval = 0.45
 
     var body: some View {
-        ZStack {
+        if hazards || panic || alarmGlow {
+            TimelineView(.periodic(from: .now, by: Self.blinkInterval)) { context in
+                let tick = Int(context.date.timeIntervalSinceReferenceDate / Self.blinkInterval)
+                drawing(lit: tick % 2 == 0)
+            }
+        } else {
+            drawing(lit: false)
+        }
+    }
+
+    private func drawing(lit: Bool) -> some View {
+        let cornersOn = (hazards || panic) && lit
+        return ZStack {
+            // Alarm: red glow pulsing around the whole car
+            if alarmGlow {
+                CarBodyShape()
+                    .stroke(Color.red, lineWidth: 3)
+                    .shadow(color: .red, radius: lit ? 18 : 6)
+                    .shadow(color: .red.opacity(0.6), radius: lit ? 30 : 10)
+                    .opacity(lit ? 1 : 0.45)
+            }
             // Wheels first, so the body covers their inner half.
             ForEach(0..<4) { i in
                 WheelShape(index: i)
@@ -250,16 +285,55 @@ struct CarTopView: View {
                                      startPoint: .top, endPoint: .bottom))
             CanopyShape().stroke(Color.white.opacity(0.25), lineWidth: 1)
             RoofSeamsShape().stroke(Color.white.opacity(0.16), lineWidth: 1)
-            // Light bars
+            // Light bars (flash during panic)
             HeadlightShape()
-                .stroke(Color.white, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
-                .shadow(color: .white.opacity(0.9), radius: 4)
+                .stroke(Color.white, style: StrokeStyle(lineWidth: panic && lit ? 3.5 : 2.2, lineCap: .round))
+                .shadow(color: .white.opacity(0.9), radius: panic && lit ? 10 : 4)
+                .opacity(panic && !lit ? 0.3 : 1)
             TaillightShape()
-                .stroke(Color(red: 1.0, green: 0.22, blue: 0.22), style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
-                .shadow(color: .red.opacity(0.9), radius: 4)
+                .stroke(Color(red: 1.0, green: 0.22, blue: 0.22), style: StrokeStyle(lineWidth: panic && lit ? 3.5 : 2.2, lineCap: .round))
+                .shadow(color: .red.opacity(0.9), radius: panic && lit ? 10 : 4)
+                .opacity(panic && !lit ? 0.3 : 1)
+            // Corner turn signals (hazards, and panic)
+            CornerLightsShape()
+                .fill(Color.orange.opacity(cornersOn ? 1 : 0.12))
+                .shadow(color: .orange, radius: cornersOn ? 10 : 0)
+                .shadow(color: .orange.opacity(0.7), radius: cornersOn ? 18 : 0)
+            // Horn sound waves (panic)
+            if panic {
+                HornWavesShape()
+                    .stroke(Color.white.opacity(lit ? 0.9 : 0.25), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+            }
         }
         .aspectRatio(0.5, contentMode: .fit)
         .accessibilityHidden(true)
+    }
+}
+
+/// Four small amber lamps at the front and rear corners.
+private struct CornerLightsShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        var path = Path()
+        for r in [g.r(13, 20, 9, 7), g.r(78, 20, 9, 7), g.r(13, 175, 9, 7), g.r(78, 175, 9, 7)] {
+            path.addRoundedRect(in: r, cornerSize: CGSize(width: r.width * 0.4, height: r.width * 0.4))
+        }
+        return path
+    }
+}
+
+/// Two arcs radiating ahead of the nose.
+private struct HornWavesShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        var path = Path()
+        for radius in [CGFloat(10), 18] {
+            let r = radius / 100 * rect.width
+            path.addArc(center: g.p(50, 4), radius: r,
+                        startAngle: .degrees(215), endAngle: .degrees(325), clockwise: false)
+            path.move(to: g.p(50, 4))   // don't join the arcs
+        }
+        return path
     }
 }
 

@@ -19,15 +19,21 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView {
+            TabView(selection: $car.selectedTab) {
                 RemoteView(showSettings: $showSettings)
                     .tabItem { Label("Remote", systemImage: "car.fill") }
+                    .tag(AppTab.remote)
                 VehicleView(showSettings: $showSettings)
                     .tabItem { Label("Vehicle", systemImage: "gauge.with.dots.needle.67percent") }
+                    .tag(AppTab.vehicle)
                 HazardsView(showSettings: $showSettings)
                     .tabItem { Label("Hazards", systemImage: "exclamationmark.triangle.fill") }
+                    .tag(AppTab.hazards)
+                    .badge(car.status.hazardsOn ? Text("On") : nil)
                 AlarmView(showSettings: $showSettings)
                     .tabItem { Label("Alarm", systemImage: "light.beacon.max.fill") }
+                    .tag(AppTab.alarm)
+                    .badge(car.status.alarmTriggered || car.status.panicOn ? Text("!") : nil)
             }
             .tint(Palette.accent)
 
@@ -59,6 +65,7 @@ struct RemoteView: View {
                 VStack(spacing: 20) {
                     header
                     if !car.demoMode && !car.hasKey { keyMissingCard }
+                    ActiveAlertsStrip()
                     StatusCard(link: car.link, status: car.status, demo: car.demoMode)
                     StartButton(status: car.status,
                                 busy: car.pending == .start || car.pending == .stop,
