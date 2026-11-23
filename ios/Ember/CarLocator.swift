@@ -39,8 +39,10 @@ final class CarLocator: NSObject, ObservableObject {
         super.init()
         authorization = manager.authorizationStatus
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBest
-        manager.distanceFilter = 5          // meters between updates
+        // ~10 m is plenty for a parking spot and uses much less power than "best".
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        manager.distanceFilter = 10         // meters between updates
+        manager.activityType = .other
     }
 
     /// Switch to another vehicle's saved spot.

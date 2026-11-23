@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import MapKit
 import CoreLocation
 
@@ -519,25 +520,26 @@ struct AlarmTile: View {
     }
 }
 
-/// Small static map of where the car is; tap to open the Location tab.
+/// Small map of where the car is; tap to open the Location tab.
+/// Uses a still picture of the map (made once per spot and kept in memory)
+/// instead of a live map view, which costs far more memory and power.
 struct MapTile: View {
     @EnvironmentObject private var car: CarController
     @EnvironmentObject private var locator: CarLocator
+    @Environment(\.colorScheme) private var scheme
+    @State private var image: UIImage?
 
     var body: some View {
+        let spot = car.mapSpot(locator: locator)
         ZStack(alignment: .bottomLeading) {
-            if let spot = car.mapSpot(locator: locator) {
-                Map(initialPosition: .region(MKCoordinateRegion(center: spot, latitudinalMeters: 450, longitudinalMeters: 450)),
-                    interactionModes: []) {
-                    Annotation("", coordinate: spot) {
+            if let image, spot != nil {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .overlay {
                         Circle().fill(Palette.accent).frame(width: 14, height: 14)
                             .overlay(Circle().stroke(.white, lineWidth: 2))
                     }
-                    UserAnnotation()
-                }
-                .mapStyle(.standard(pointsOfInterest: .excludingAll))
-                .id(car.selectedVehicleID)
-                .allowsHitTesting(false)
             } else {
                 LinearGradient(colors: [Color.primary.opacity(0.08), Color.primary.opacity(0.02)],
                                startPoint: .top, endPoint: .bottom)
@@ -552,6 +554,11 @@ struct MapTile: View {
                 .padding(.vertical, 4)
                 .glass(Capsule())
                 .padding(8)
+        }
+        .clipped()
+        .task(id: MapSnapshots.key(spot, dark: scheme == .dark)) {
+            guard let spot else { image = nil; return }
+            image = await MapSnapshots.image(for: spot, dark: scheme == .dark)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Location. \(caption)")
@@ -691,5 +698,30 @@ struct SettingsButton: View {
         .fixedSize()            // never squeezed, always top-right
         .layoutPriority(1)
         .accessibilityLabel("Settings")
+    }
+}
+
+/// Still map pictures for the Home tile, cached by spot (rounded to ~10 m) and theme.
+@MainActor
+enum MapSnapshots {
+    private static var cache: [String: UIImage] = [:]
+
+    static func key(_ c: CLLocationCoordinate2D?, dark: Bool) -> String {
+        guard let c else { return "none" }
+        return String(format: "%.4f,%.4f,%d", c.latitude, c.longitude, dark ? 1 : 0)
+    }
+
+    static func image(for c: CLLocationCoordinate2D, dark: Bool) async -> UIImage? {
+        let k = key(c, dark: dark)
+        if let hit = cache[k] { return hit }
+        let options = MKMapSnapshotter.Options()
+        options.region = MKCoordinateRegion(center: c, latitudinalMeters: 450, longitudinalMeters: 450)
+        options.size = CGSize(width: 220, height: 110)
+        options.pointOfInterestFilter = .excludingAll
+        options.traitCollection = UITraitCollection(userInterfaceStyle: dark ? .dark : .light)
+        guard let snapshot = try? await MKMapSnapshotter(options: options).start() else { return nil }
+        if cache.count > 8 { cache.removeAll() }
+        cache[k] = snapshot.image
+        return snapshot.image
     }
 }

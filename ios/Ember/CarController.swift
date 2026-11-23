@@ -570,7 +570,10 @@ final class CarController: ObservableObject {
 enum Haptics {
     static let enabledKey = "ember.haptics"
     private static var on: Bool { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
-    @MainActor static func success() { if on { UINotificationFeedbackGenerator().notificationOccurred(.success) } }
-    @MainActor static func error() { if on { UINotificationFeedbackGenerator().notificationOccurred(.error) } }
-    @MainActor static func tap() { if on { UIImpactFeedbackGenerator(style: .medium).impactOccurred() } }
+    // Made once and reused: creating a generator per tap adds a little delay.
+    @MainActor private static let notifier = UINotificationFeedbackGenerator()
+    @MainActor private static let impact = UIImpactFeedbackGenerator(style: .medium)
+    @MainActor static func success() { if on { notifier.notificationOccurred(.success); notifier.prepare() } }
+    @MainActor static func error() { if on { notifier.notificationOccurred(.error); notifier.prepare() } }
+    @MainActor static func tap() { if on { impact.impactOccurred(); impact.prepare() } }
 }

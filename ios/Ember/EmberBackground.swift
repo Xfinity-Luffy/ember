@@ -6,12 +6,16 @@ import SwiftUI
 struct EmberBackground: View {
     var running: Bool
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
     private var light: Bool { scheme == .light }
 
     var body: some View {
         ZStack {
             if #available(iOS 18.0, *) {
-                TimelineView(.animation(minimumInterval: 1 / 30)) { context in
+                // The drift is slow, so 15 frames a second looks identical to 30 and
+                // halves the work. It holds still in Low Power Mode or with Reduce Motion.
+                TimelineView(.animation(minimumInterval: 1 / 15, paused: reduceMotion || lowPower)) { context in
                     mesh(time: context.date.timeIntervalSinceReferenceDate)
                 }
             } else {
@@ -23,6 +27,9 @@ struct EmberBackground: View {
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 1.2), value: running)
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
+            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
     }
 
     // MARK: iOS 18+: animated mesh gradient

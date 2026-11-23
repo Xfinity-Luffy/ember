@@ -643,6 +643,10 @@ void setup() {
   scanData.setName(EMBER_DEVICE_NAME);
   scanData.setManufacturerData(mfg);
   adv->setScanResponseData(scanData);
+  // Advertise every 200-300 ms instead of the fast default: noticeably less
+  // standby power, and the phone still reconnects in well under a second.
+  adv->setMinInterval(320);   // units of 0.625 ms
+  adv->setMaxInterval(480);
   adv->start();
 
   Serial.println("Advertising. Waiting for the app.");
