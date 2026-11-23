@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var confirmRemoveKey = false
     @State private var confirmForget = false
     @State private var showPairingHelp = false
+    @State private var showVehicles = false
 
     var body: some View {
         NavigationStack {
@@ -45,22 +46,28 @@ struct SettingsView: View {
                 Text("Use this after replacing the board in your car.")
             }
             .sheet(isPresented: $showPairingHelp) { PairingHelpView() }
+            .sheet(isPresented: $showVehicles) { VehiclesView().environmentObject(car) }
         }
     }
 
     // MARK: Sections
 
     private var carSection: some View {
-        SettingsSection("Car") {
-            HStack(spacing: 14) {
-                RowIcon("car.fill", Palette.accent)
-                TextField("Car name", text: $car.carName)
-                    .font(.body.weight(.medium))
-                    .submitLabel(.done)
-                    .onChange(of: car.carName) { _, name in
-                        if name.count > 40 { car.carName = String(name.prefix(40)) }
+        SettingsSection("Vehicles", footer: "Connection and bridge key below apply to \(car.carName). Each vehicle keeps its own.") {
+            Button { showVehicles = true } label: {
+                HStack(spacing: 14) {
+                    RowIcon("car.2.fill", Palette.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(car.carName).font(.body.weight(.medium))
+                        Text("\(car.vehicles.count) of \(Vehicle.maxCount) vehicles · switch, add or edit")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
     }
 

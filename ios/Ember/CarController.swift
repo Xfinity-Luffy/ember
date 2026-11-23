@@ -13,7 +13,7 @@ struct Banner: Identifiable, Equatable {
 enum AppTab: Hashable { case remote, vehicle, hazards, alarm, location }
 
 /// How the app reaches the car.
-enum ConnectionMode: String, CaseIterable, Identifiable {
+enum ConnectionMode: String, CaseIterable, Identifiable, Codable {
     case bluetooth, cellular, automatic
     var id: String { rawValue }
     var title: String {
@@ -43,7 +43,12 @@ final class CarController: ObservableObject {
     /// When this phone first saw the "alarm went off" warning.
     @Published private(set) var alarmTriggeredAt: Date?
     @Published private(set) var pending: CarCommand?
-    @Published private(set) var hasKey = SecretStore.load() != nil
+    @Published private(set) var hasKey = false
+    /// Your cars (1 to 4) and which one the app is controlling.
+    @Published private(set) var vehicles: [Vehicle] = []
+    @Published private(set) var selectedVehicleID = UUID()
+    /// Shows the vehicle switcher sheet.
+    @Published var showingVehicles = false
     @Published var banner: Banner?
     @Published var selectedTab: AppTab = .remote
 
@@ -53,8 +58,15 @@ final class CarController: ObservableObject {
             rebuildTransport()
         }
     }
-    @Published var carName: String {
-        didSet { UserDefaults.standard.set(carName, forKey: Keys.name) }
+    /// The vehicle the app is controlling.
+    var selectedVehicle: Vehicle {
+        vehicles.first { $0.id == selectedVehicleID } ?? vehicles.first ?? Vehicle(name: "My Car")
+    }
+    var canAddVehicle: Bool { vehicles.count < Vehicle.maxCount }
+
+    var carName: String {
+        get { selectedVehicle.name }
+        set { updateSelected { $0.name = newValue } }
     }
     /// Ask for Face ID (or the passcode) before Unlock and Start.
     @Published var requireFaceID: Bool {
@@ -64,9 +76,12 @@ final class CarController: ObservableObject {
     @Published var hapticsOn: Bool {
         didSet { UserDefaults.standard.set(hapticsOn, forKey: Haptics.enabledKey) }
     }
-    @Published var connectionMode: ConnectionMode {
-        didSet {
-            UserDefaults.standard.set(connectionMode.rawValue, forKey: Keys.mode)
+    /// Bluetooth / Cellular / Automatic, per vehicle.
+    var connectionMode: ConnectionMode {
+        get { selectedVehicle.connection }
+        set {
+            guard newValue != selectedVehicle.connection else { return }
+            updateSelected { $0.connection = newValue }
             rebuildTransport()
         }
     }
@@ -88,18 +103,19 @@ final class CarController: ObservableObject {
         static let defrost = "ember.defrostOnStart"
         static let faceID = "ember.requireFaceID"
         static let mode = "ember.connectionMode"
+        static let vehicles = "ember.vehicles"
+        static let selected = "ember.selectedVehicle"
         static let relay = "ember.relayHost"
     }
 
     init() {
         let defaults = UserDefaults.standard
         demoMode = defaults.object(forKey: Keys.demo) as? Bool ?? true
-        carName = defaults.string(forKey: Keys.name) ?? "My Car"
         defrostOnStart = defaults.bool(forKey: Keys.defrost)
         requireFaceID = defaults.bool(forKey: Keys.faceID)
-        connectionMode = ConnectionMode(rawValue: defaults.string(forKey: Keys.mode) ?? "") ?? .bluetooth
         relayHost = defaults.string(forKey: Keys.relay) ?? ""
         hapticsOn = defaults.object(forKey: Haptics.enabledKey) as? Bool ?? true
+        loadVehicles()                      // after every stored property is set
         rebuildTransport()
     }
 
@@ -143,7 +159,7 @@ final class CarController: ObservableObject {
     /// Forgets the remembered bridge so the app searches for one again
     /// (use after replacing the ESP32 board).
     func forgetBridge() {
-        UserDefaults.standard.removeObject(forKey: BLETransport.savedPeripheralKey)
+        UserDefaults.standard.removeObject(forKey: selectedVehicle.peripheralKey)
         rebuildTransport()
         show("Searching for a bridge nearby.", kind: .info)
     }
@@ -208,14 +224,133 @@ final class CarController: ObservableObject {
 
     /// Returns false if the text isn't a valid 64-character hex key.
     func saveKey(hex: String) -> Bool {
-        guard let data = SecretStore.parseHex(hex), SecretStore.save(data) else { return false }
+        guard let data = SecretStore.parseHex(hex),
+              SecretStore.save(data, account: selectedVehicle.keychainAccount) else { return false }
         hasKey = true
+        rebuildTransport()
         return true
     }
 
     func removeKey() {
-        SecretStore.delete()
+        SecretStore.delete(account: selectedVehicle.keychainAccount)
         hasKey = false
+    }
+
+    // MARK: Vehicles
+
+    /// Loads saved vehicles, or turns the single-car setup into vehicle #1.
+    private func loadVehicles() {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: Keys.vehicles),
+           let saved = try? JSONDecoder().decode([Vehicle].self, from: data), !saved.isEmpty {
+            vehicles = saved
+            if let idString = defaults.string(forKey: Keys.selected), let id = UUID(uuidString: idString),
+               saved.contains(where: { $0.id == id }) {
+                selectedVehicleID = id
+            } else {
+                selectedVehicleID = saved[0].id
+            }
+        } else {
+            // First run of the multi-car version: keep everything about the existing car.
+            var first = Vehicle(name: defaults.string(forKey: Keys.name) ?? "My Car")
+            first.connection = ConnectionMode(rawValue: defaults.string(forKey: Keys.mode) ?? "") ?? .bluetooth
+            if let key = SecretStore.load(account: SecretStore.legacyAccount) {
+                SecretStore.save(key, account: first.keychainAccount)
+                SecretStore.delete(account: SecretStore.legacyAccount)
+            }
+            if let bridge = defaults.string(forKey: "ember.bridgePeripheralID") {
+                defaults.set(bridge, forKey: first.peripheralKey)
+                defaults.removeObject(forKey: "ember.bridgePeripheralID")
+            }
+            if let spot = defaults.data(forKey: "ember.carSpot") {
+                defaults.set(spot, forKey: first.spotKey)
+                defaults.removeObject(forKey: "ember.carSpot")
+            }
+            vehicles = [first]
+            selectedVehicleID = first.id
+            saveVehicles()
+        }
+        hasKey = SecretStore.load(account: selectedVehicle.keychainAccount) != nil
+    }
+
+    private func saveVehicles() {
+        let defaults = UserDefaults.standard
+        if let data = try? JSONEncoder().encode(vehicles) { defaults.set(data, forKey: Keys.vehicles) }
+        defaults.set(selectedVehicleID.uuidString, forKey: Keys.selected)
+    }
+
+    private func updateSelected(_ change: (inout Vehicle) -> Void) {
+        guard let i = vehicles.firstIndex(where: { $0.id == selectedVehicleID }) else { return }
+        change(&vehicles[i])
+        saveVehicles()
+    }
+
+    /// Switch which car the app controls.
+    func selectVehicle(_ id: UUID) {
+        guard id != selectedVehicleID, vehicles.contains(where: { $0.id == id }) else { return }
+        selectedVehicleID = id
+        saveVehicles()
+        hasKey = SecretStore.load(account: selectedVehicle.keychainAccount) != nil
+        alarmTriggeredAt = nil
+        rebuildTransport()
+        Haptics.tap()
+        show("Now controlling \(selectedVehicle.name)", kind: .info)
+    }
+
+    /// Adds a car (max 4). `keyHex` is optional; it can be added later in Settings.
+    /// Returns an error message, or nil on success.
+    func addVehicle(_ vehicle: Vehicle, keyHex: String) -> String? {
+        guard canAddVehicle else { return "You can add up to \(Vehicle.maxCount) vehicles." }
+        let trimmed = keyHex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            guard let key = SecretStore.parseHex(trimmed) else {
+                return "That isn't a 64-character key. Copy the exact EMBER_SECRET_HEX value from that car's config.h."
+            }
+            SecretStore.save(key, account: vehicle.keychainAccount)
+        }
+        vehicles.append(vehicle)
+        saveVehicles()
+        selectVehicle(vehicle.id)
+        return nil
+    }
+
+    /// Saves edits to a car. A non-empty `keyHex` replaces its bridge key.
+    func updateVehicle(_ vehicle: Vehicle, keyHex: String) -> String? {
+        guard let i = vehicles.firstIndex(where: { $0.id == vehicle.id }) else { return nil }
+        let trimmed = keyHex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            guard let key = SecretStore.parseHex(trimmed) else {
+                return "That isn't a 64-character key. Copy the exact EMBER_SECRET_HEX value from that car's config.h."
+            }
+            SecretStore.save(key, account: vehicle.keychainAccount)
+        }
+        let connectionChanged = vehicles[i].connection != vehicle.connection
+        vehicles[i] = vehicle
+        saveVehicles()
+        if vehicle.id == selectedVehicleID {
+            hasKey = SecretStore.load(account: vehicle.keychainAccount) != nil
+            if connectionChanged || !trimmed.isEmpty { rebuildTransport() }
+        }
+        return nil
+    }
+
+    func hasKey(for vehicle: Vehicle) -> Bool {
+        SecretStore.load(account: vehicle.keychainAccount) != nil
+    }
+
+    /// Removes a car and everything stored for it. The last car can't be removed.
+    func deleteVehicle(_ id: UUID) {
+        guard vehicles.count > 1, let v = vehicles.first(where: { $0.id == id }) else { return }
+        SecretStore.delete(account: v.keychainAccount)
+        UserDefaults.standard.removeObject(forKey: v.peripheralKey)
+        UserDefaults.standard.removeObject(forKey: v.spotKey)
+        vehicles.removeAll { $0.id == id }
+        if id == selectedVehicleID {
+            selectedVehicleID = vehicles[0].id
+            hasKey = SecretStore.load(account: selectedVehicle.keychainAccount) != nil
+            rebuildTransport()
+        }
+        saveVehicles()
     }
 
     // MARK: Lifecycle
@@ -231,15 +366,17 @@ final class CarController: ObservableObject {
 
     private func rebuildTransport() {
         transport?.stop()
-        let key = { SecretStore.load().map { SymmetricKey(data: $0) } }
+        let current = selectedVehicle
+        let key = { SecretStore.load(account: current.keychainAccount).map { SymmetricKey(data: $0) } }
         let t: CarTransport
         if demoMode {
             t = DemoTransport()
         } else {
             switch connectionMode {
-            case .bluetooth: t = BLETransport(secret: key)
+            case .bluetooth: t = BLETransport(secret: key, peripheralKey: current.peripheralKey)
             case .cellular: t = CloudTransport(host: relayHost, key: key)
-            case .automatic: t = AutoTransport(ble: BLETransport(secret: key), cloud: CloudTransport(host: relayHost, key: key))
+            case .automatic: t = AutoTransport(ble: BLETransport(secret: key, peripheralKey: current.peripheralKey),
+                                               cloud: CloudTransport(host: relayHost, key: key))
             }
         }
         t.onLinkChange = { [weak self] in self?.link = $0 }

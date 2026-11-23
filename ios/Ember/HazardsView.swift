@@ -57,7 +57,8 @@ struct HazardsView: View {
                     // The car, with its corner lights blinking while the hazards are on.
                     HStack(spacing: 18) {
                         CarTopView(lowTires: [false, false, false, false],
-                                   hazards: on, panic: car.status.panicOn, alarmGlow: false)
+                                   hazards: on, panic: car.status.panicOn, alarmGlow: false,
+                                   bodyColor: car.selectedVehicle.color.swatch)
                             .frame(width: 64, height: 128)
                         VStack(alignment: .leading, spacing: 6) {
                             Text(on ? "Corner lights flashing" : "Corner lights off")

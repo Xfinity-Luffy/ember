@@ -550,8 +550,18 @@ void setup() {
 
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(SERVICE_UUID);
-  adv->setName(EMBER_DEVICE_NAME);
-  adv->enableScanResponse(true);
+
+  // Scan response: name + this car's ID, so an app with several cars connects
+  // to the right bridge. ID = first 8 bytes of HMAC(key, "EMBR-ID"); it reveals
+  // nothing about the key. Layout: [0xFFFF test company ID]['E''M'][8-byte ID].
+  uint8_t carId[8];
+  hmacTrunc("EMBR-ID", nullptr, 0, nullptr, 0, carId, 8);
+  std::string mfg("\xFF\xFF" "EM", 4);
+  mfg.append((const char*)carId, 8);
+  NimBLEAdvertisementData scanData;
+  scanData.setName(EMBER_DEVICE_NAME);
+  scanData.setManufacturerData(mfg);
+  adv->setScanResponseData(scanData);
   adv->start();
 
   Serial.println("Advertising. Waiting for the app.");

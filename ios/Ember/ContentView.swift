@@ -50,6 +50,9 @@ struct ContentView: View {
         }
         .animation(.spring(duration: 0.35), value: car.banner)
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(car) }
+        .sheet(isPresented: $car.showingVehicles) { VehiclesView().environmentObject(car) }
+        .onAppear { locator.useVehicle(spotKey: car.selectedVehicle.spotKey) }
+        .onChange(of: car.selectedVehicleID) { _, _ in locator.useVehicle(spotKey: car.selectedVehicle.spotKey) }
         // While the app is connected to the bridge, the phone is at the car:
         // let the locator keep the car's spot up to date.
         .onAppear { locator.nearCar = car.link == .ready && !car.demoMode }
@@ -96,13 +99,33 @@ struct RemoteView: View {
         HStack(alignment: .top, spacing: 12) {
             // Long names wrap onto a second line (then shrink a little, then end in "…")
             // instead of pushing the settings button out of place.
-            Text(car.carName)
-                .font(.system(size: 30, weight: .bold, design: .rounded))
-                .lineLimit(2)
-                .minimumScaleFactor(0.75)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
+            Button { car.showingVehicles = true } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(car.carName)
+                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.75)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    if car.vehicles.count > 1 || !car.selectedVehicle.description.isEmpty {
+                        Text(car.vehicles.count > 1
+                             ? "\(car.selectedVehicle.description.isEmpty ? "Vehicle" : car.selectedVehicle.description) · \(car.vehicles.count) vehicles"
+                             : car.selectedVehicle.description)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(car.carName). Switch vehicle")
             SettingsButton { showSettings = true }
         }
         .padding(.top, 12)

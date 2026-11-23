@@ -13,6 +13,8 @@ Ember lets your iPhone lock, unlock, start and stop your car over Bluetooth, and
 | `firmware/EmberBridge/` | Firmware for the ESP32 board in the car. Settings live in `config.h`. |
 | `.github/workflows/` | The cloud build that turns the code into an installable `Ember.ipa`. |
 
+**Several cars?** Build one bridge per car, each with its **own** `EMBER_SECRET_HEX` and passkey. Each bridge advertises an ID derived from its key, so the app connects to the bridge of the car you've selected, even when two are parked side by side. Add each car in the app with its own key.
+
 ### What's in the app
 
 - **Main screen:** a status card in plain English, a press-and-hold power button (a quick tap explains the gesture), an "Also turn on rear defrost" switch, and Lock / Unlock with the current state checked.
@@ -21,6 +23,7 @@ Ember lets your iPhone lock, unlock, start and stop your car over Bluetooth, and
 - **Hazards tab:** a big blinking triangle to turn the hazard lights on or off, with an automatic 10-minute shut-off.
 - **Alarm tab:** armed or not (from the lock state), a warning when the alarm went off, and a press-and-hold panic button.
 - **Location tab:** a live map of where your car is. While the app is connected to the bridge, your phone is at the car, so the car's spot updates live; after you walk away it keeps the last spot with the address, how long ago, how far you are, and walking directions. No extra hardware, and the location never leaves your iPhone. (Tracking the car from anywhere, e.g. if it's stolen, would need a GPS + cellular board in the car.)
+- **Up to 4 vehicles:** tap the car's name at the top to switch, add or edit. Each vehicle has its own bridge (with its own key), connection type, saved parking spot, color and identification. Enter the VIN and tap **Look up** to fill in year, make, model and trim from NHTSA's free public database.
 - **Connection:** Bluetooth (default), Cellular, or Automatic (Bluetooth when near, cellular when away). Cellular is optional and needs the LTE module and relay server below.
 - **Settings:** car name, demo mode, connection status, bridge key, Face ID for Unlock and Start, defrost with every start, vibration feedback, "Find my bridge again", and pairing help.
 

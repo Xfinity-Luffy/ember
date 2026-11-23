@@ -5,6 +5,7 @@ import SwiftUI
 struct VehicleView: View {
     @EnvironmentObject private var car: CarController
     @Binding var showSettings: Bool
+    @State private var editing: Vehicle?
 
     var body: some View {
         ZStack {
@@ -14,6 +15,7 @@ struct VehicleView: View {
                 VStack(spacing: 20) {
                     header
                     ActiveAlertsStrip()
+                    IdentificationCard(vehicle: car.selectedVehicle) { editing = car.selectedVehicle }
                     FuelCard(percent: car.vehicle.fuelPercent,
                              ageMinutes: car.vehicle.fuelAgeMinutes,
                              connected: car.link.isUsable)
@@ -21,7 +23,8 @@ struct VehicleView: View {
                              ageMinutes: car.vehicle.tiresAgeMinutes,
                              hazards: car.status.hazardsOn,
                              panic: car.status.panicOn,
-                             alarm: car.status.alarmTriggered)
+                             alarm: car.status.alarmTriggered,
+                             bodyColor: car.selectedVehicle.color.swatch)
                     if car.demoMode {
                         Label("Demo mode shows sample readings.", systemImage: "sparkles")
                             .font(.footnote)
@@ -33,6 +36,7 @@ struct VehicleView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: car.vehicle)
+        .sheet(item: $editing) { v in VehicleEditView(original: v).environmentObject(car) }
     }
 
     private var header: some View {
@@ -145,6 +149,7 @@ struct TireCard: View {
     var hazards = false
     var panic = false
     var alarm = false
+    var bodyColor: Color? = nil
 
     /// Below this, a tire is flagged. Your exact pressure is on the driver's door-frame sticker.
     private let lowPSI = 30.0
@@ -173,7 +178,7 @@ struct TireCard: View {
                     TireReading(label: "Front left", value: psi?[0], low: lowPSI)
                     TireReading(label: "Rear left", value: psi?[2], low: lowPSI)
                 }
-                CarTopView(lowTires: lowFlags, hazards: hazards, panic: panic, alarmGlow: alarm)
+                CarTopView(lowTires: lowFlags, hazards: hazards, panic: panic, alarmGlow: alarm, bodyColor: bodyColor)
                     .frame(width: 92, height: 184)
                 VStack(spacing: 46) {
                     TireReading(label: "Front right", value: psi?[1], low: lowPSI)
@@ -237,6 +242,8 @@ struct CarTopView: View {
     var hazards = false
     var panic = false
     var alarmGlow = false
+    /// Paint color of the selected vehicle (nil = neutral silver glass).
+    var bodyColor: Color? = nil
 
     private static let blinkInterval = 0.45
 
@@ -274,7 +281,8 @@ struct CarTopView: View {
             MirrorsShape().fill(Color.white.opacity(0.22))
             // Body: soft metallic sheen
             CarBodyShape()
-                .fill(LinearGradient(colors: [Color.white.opacity(0.30), Color.white.opacity(0.10), Color.white.opacity(0.16)],
+                .fill(LinearGradient(colors: bodyColor.map { [$0.opacity(0.95), $0.opacity(0.65), $0.opacity(0.8)] }
+                                        ?? [Color.white.opacity(0.30), Color.white.opacity(0.10), Color.white.opacity(0.16)],
                                      startPoint: .top, endPoint: .bottom))
             CarBodyShape().stroke(Color.white.opacity(0.35), lineWidth: 1.2)
             // Hood crease

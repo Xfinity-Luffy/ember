@@ -50,14 +50,19 @@ final class BLETransport: NSObject, CarTransport {
     private var writeWaiter: Waiter<Void>?
     private var statusWaiter: (previousSeq: UInt8, waiter: Waiter<CarStatus>)?
 
-    static let savedPeripheralKey = "ember.bridgePeripheralID"
+    /// Where this vehicle's bridge is remembered (one entry per vehicle).
+    private let savedPeripheralKey: String
+    /// This vehicle's ID, advertised by its bridge (first 8 bytes of HMAC(key,"EMBR-ID")).
+    private let expectedCarId: () -> Data?
 
     private var link: LinkState = .searching {
         didSet { if link != oldValue { onLinkChange?(link) } }
     }
 
-    init(secret: @escaping () -> SymmetricKey?) {
+    init(secret: @escaping () -> SymmetricKey?, peripheralKey: String) {
         self.secret = secret
+        self.savedPeripheralKey = peripheralKey
+        self.expectedCarId = { secret().flatMap { Data(hexString: EmberCloud.ids(key: $0).carId) } }
         super.init()
     }
 
@@ -121,15 +126,11 @@ final class BLETransport: NSObject, CarTransport {
 
         // Reconnect to the bridge we used before. connect() has no timeout on iOS,
         // so this quietly waits until the car is in range.
-        if let idString = UserDefaults.standard.string(forKey: Self.savedPeripheralKey),
+        if let idString = UserDefaults.standard.string(forKey: savedPeripheralKey),
            let id = UUID(uuidString: idString),
            let known = central.retrievePeripherals(withIdentifiers: [id]).first {
             attach(known)
             link = .searching
-            return
-        }
-        if let already = central.retrieveConnectedPeripherals(withServices: [EmberProtocol.service]).first {
-            attach(already)
             return
         }
         link = .searching
@@ -139,7 +140,7 @@ final class BLETransport: NSObject, CarTransport {
     private func attach(_ p: CBPeripheral) {
         peripheral = p
         p.delegate = self
-        UserDefaults.standard.set(p.identifier.uuidString, forKey: Self.savedPeripheralKey)
+        UserDefaults.standard.set(p.identifier.uuidString, forKey: savedPeripheralKey)
         central?.connect(p)
     }
 
@@ -189,6 +190,14 @@ extension BLETransport: @preconcurrency CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        // With several cars nearby, only take the bridge that advertises this car's ID:
+        // [0xFFFF]['E''M'][8-byte ID]. Older bridges without it are accepted.
+        if let mfg = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data,
+           mfg.count >= 12, mfg[mfg.startIndex + 2] == 0x45, mfg[mfg.startIndex + 3] == 0x4D,
+           let expected = expectedCarId(),
+           mfg.subdata(in: (mfg.startIndex + 4)..<(mfg.startIndex + 12)) != expected {
+            return   // another car's bridge; keep scanning
+        }
         central.stopScan()
         link = .connecting
         attach(peripheral)

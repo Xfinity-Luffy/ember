@@ -32,7 +32,8 @@ final class CarLocator: NSObject, ObservableObject {
     private let manager = CLLocationManager()
     private let geocoder = CLGeocoder()
     private var lastGeocoded: CLLocation?
-    private static let storeKey = "ember.carSpot"
+    /// The selected vehicle's storage key (see Vehicle.spotKey).
+    private var storeKey = ""
 
     override init() {
         super.init()
@@ -40,7 +41,16 @@ final class CarLocator: NSObject, ObservableObject {
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.distanceFilter = 5          // meters between updates
-        if let data = UserDefaults.standard.data(forKey: Self.storeKey),
+    }
+
+    /// Switch to another vehicle's saved spot.
+    func useVehicle(spotKey: String) {
+        guard spotKey != storeKey else { return }
+        storeKey = spotKey
+        carSpot = nil
+        address = nil
+        lastGeocoded = nil
+        if let data = UserDefaults.standard.data(forKey: storeKey),
            let spot = try? JSONDecoder().decode(CarSpot.self, from: data) {
             carSpot = spot
             lookUpAddress(for: CLLocation(latitude: spot.latitude, longitude: spot.longitude))
@@ -66,12 +76,13 @@ final class CarLocator: NSObject, ObservableObject {
     }
 
     private func save(_ location: CLLocation) {
+        guard !storeKey.isEmpty else { return }
         let spot = CarSpot(latitude: location.coordinate.latitude,
                            longitude: location.coordinate.longitude,
                            time: Date())
         carSpot = spot
         if let data = try? JSONEncoder().encode(spot) {
-            UserDefaults.standard.set(data, forKey: Self.storeKey)
+            UserDefaults.standard.set(data, forKey: storeKey)
         }
         // Only look the address up again after moving a bit, not on every update.
         if lastGeocoded.map({ $0.distance(from: location) > 40 }) ?? true {

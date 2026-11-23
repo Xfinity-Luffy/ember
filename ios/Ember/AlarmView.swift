@@ -91,7 +91,8 @@ struct AlarmView: View {
                 CarTopView(lowTires: [false, false, false, false],
                            hazards: car.status.hazardsOn,
                            panic: car.status.panicOn,
-                           alarmGlow: car.status.alarmTriggered)
+                           alarmGlow: car.status.alarmTriggered,
+                           bodyColor: car.selectedVehicle.color.swatch)
                     .frame(width: 56, height: 112)
                     .overlay(alignment: .bottomTrailing) {
                         Image(systemName: icon)
