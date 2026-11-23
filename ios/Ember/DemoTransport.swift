@@ -12,10 +12,13 @@ final class DemoTransport: CarTransport {
     private var status = CarStatus()
     private var ticker: Task<Void, Never>?
     private let runSeconds = 15 * 60
+    private let hazardSeconds = 10 * 60
+    private let panicSeconds = 30
 
     init() {
         status.runStatusWired = true
         status.lock = .locked
+        status.alarmWired = true
     }
 
     func start() {
@@ -54,19 +57,42 @@ final class DemoTransport: CarTransport {
             else { status.engineRunning = false; status.secondsRemaining = 0; result = .ok }
         case .aux1:
             result = status.engineRunning ? .ok : .notRunning
+        case .hazardsOn:
+            status.hazardsOn = true; status.hazardSecondsRemaining = hazardSeconds; result = .ok
+        case .hazardsOff:
+            status.hazardsOn = false; status.hazardSecondsRemaining = 0; result = .ok
+        case .panicOn:
+            status.panicOn = true; status.panicSecondsRemaining = panicSeconds; result = .ok
+        case .panicOff:
+            status.panicOn = false; status.panicSecondsRemaining = 0; result = .ok
+        case .alarmAck:
+            status.alarmTriggered = false; result = .ok
         }
+        if command == .unlock { status.alarmTriggered = false }
         status.lastResult = result
         status.sequence &+= 1
         onStatus?(status)
         if result != .ok { throw CarError.rejected(result) }
     }
 
+    func simulateAlarm() {
+        status.alarmTriggered = true
+        onStatus?(status)
+    }
+
     private func tick() {
-        guard status.engineRunning else { return }
-        status.secondsRemaining -= 1
-        if status.secondsRemaining <= 0 {
-            status.engineRunning = false
-            status.secondsRemaining = 0
+        guard status.engineRunning || status.hazardsOn || status.panicOn else { return }
+        if status.engineRunning {
+            status.secondsRemaining -= 1
+            if status.secondsRemaining <= 0 { status.engineRunning = false; status.secondsRemaining = 0 }
+        }
+        if status.hazardsOn {
+            status.hazardSecondsRemaining -= 1
+            if status.hazardSecondsRemaining <= 0 { status.hazardsOn = false; status.hazardSecondsRemaining = 0 }
+        }
+        if status.panicOn {
+            status.panicSecondsRemaining -= 1
+            if status.panicSecondsRemaining <= 0 { status.panicOn = false; status.panicSecondsRemaining = 0 }
         }
         onStatus?(status)
     }

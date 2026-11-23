@@ -43,6 +43,21 @@
 #define PULSE_MS             500
 
 // ---------------------------------------------------------------------------
+//  Hazards and alarm (Hazards and Alarm tabs). Each is a short pulse, like
+//  pressing a button: one pulse turns it on, the next turns it off.
+//  Use -1 to disable.
+// ---------------------------------------------------------------------------
+#define PIN_HAZARD           16   // relay across the hazard button, or a module output set to "hazards"
+#define PIN_PANIC            17   // the remote-start module's panic input (horn + lights)
+#define HAZARD_AUTO_OFF_MIN  10   // turn hazards off automatically after this many minutes
+#define PANIC_SECONDS        30   // stop the panic alarm automatically after this long
+
+// Optional input: the remote-start module's "alarm triggered" output (via an
+// optocoupler, like the run-status input). Lets the app warn you the alarm went off.
+#define PIN_ALARM_INPUT      18   // -1 if not wired
+#define ALARM_ACTIVE_LEVEL   LOW
+
+// ---------------------------------------------------------------------------
 //  Optional input — "engine running" status from the module.
 //  Strongly recommended: without it the bridge can only GUESS whether the
 //  engine is running (it assumes the car runs for RUN_TIME_MINUTES after a

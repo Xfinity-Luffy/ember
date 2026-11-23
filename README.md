@@ -18,6 +18,8 @@ Ember lets your iPhone lock, unlock, start and stop your car over Bluetooth, and
 - **Main screen:** a status card in plain English, a press-and-hold power button (a quick tap explains the gesture), an "Also turn on rear defrost" switch, and Lock / Unlock with the current state checked.
 - **Look:** Liquid Glass on iOS 26 (frosted glass on iOS 17–18) over a slowly drifting night-sky background that glows warmer while the engine runs.
 - **Vehicle tab:** a fuel gauge read from the car's diagnostic port (OBD-II), and a tire-pressure diagram that flags low tires (tire readings need extra work, see Wiring).
+- **Hazards tab:** a big blinking triangle to turn the hazard lights on or off, with an automatic 10-minute shut-off.
+- **Alarm tab:** armed or not (from the lock state), a warning when the alarm went off, and a press-and-hold panic button.
 - **Settings:** car name, demo mode, connection status, bridge key, Face ID for Unlock and Start, defrost with every start, vibration feedback, "Find my bridge again", and pairing help.
 
 ---
@@ -104,6 +106,16 @@ Hold the big power button for one second to "start" the demo car.
 
 Pin numbers are set in `config.h`, so you can change them. Never connect 12 V directly to an ESP32 pin.
 
+**Optional: hazards and alarm (Hazards and Alarm tabs).** Two more relay channels and one more optocoupler input:
+
+```
+ ESP32 GPIO16 ──▶ Relay 5 IN   Relay 5: across the hazard button's contacts, or a module output set to hazards
+ ESP32 GPIO17 ──▶ Relay 6 IN   Relay 6: COM ─ ground, NO ─ module PANIC trigger input (horn + lights)
+ Module "alarm triggered" output ──▶ optocoupler ──▶ ESP32 GPIO18 and GND   (lets the app warn you)
+```
+
+Each output is a short pulse, like pressing a button once. The bridge turns hazards off after 10 minutes and stops the panic alarm after 30 seconds (`HAZARD_AUTO_OFF_MIN` and `PANIC_SECONDS` in `config.h`). Have the installer confirm which module wires do this on your setup, and set any pin you don't wire to `-1`. The alarm warning only reaches your phone while it's connected to the bridge over Bluetooth.
+
 **Optional: fuel level for the Vehicle tab.** Add a 3.3 V CAN transceiver board (SN65HVD230, about $5) and an OBD-II splitter or pigtail cable, so you never cut the car's wiring:
 
 ```
@@ -174,6 +186,6 @@ After that, the app reconnects automatically whenever you open it near the car.
 | Command | `6a4d6a66-0fe9-48ca-878e-238060417a9d` | write, encrypted | `[cmd][HMAC-SHA256(key, "EMBR" ‖ challenge ‖ cmd)[0..16]]` |
 | Status | `7bdb2e96-9fcf-4522-b098-7264afa1c44d` | read/notify, encrypted | `[1][flags][secs LE16][lastResult][seq]` |
 
-Commands: `01` lock, `02` unlock, `03` start, `04` stop, `05` aux1 (defrost).
-Flags: bit0 running, bit1 status wired, bit2 lock known, bit3 locked.
+Commands: `01` lock, `02` unlock, `03` start, `04` stop, `05` aux1 (defrost), `06`/`07` hazards on/off, `08`/`09` panic on/off, `0A` clear alarm warning.
+Flags: bit0 running, bit1 status wired, bit2 lock known, bit3 locked, bit4 hazards on, bit5 panic on, bit6 alarm went off, bit7 alarm input wired. Newer bridges add hazard and panic seconds left (LE16 each) after `seq`.
 Results: 0 none, 1 ok, 2 bad key, 3 already running, 4 not running, 5 locked out, 6 bad format, 7 output not wired.

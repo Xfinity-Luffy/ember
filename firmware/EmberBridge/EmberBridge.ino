@@ -35,6 +35,11 @@ enum Command : uint8_t {
   CMD_START  = 0x03,
   CMD_STOP   = 0x04,
   CMD_AUX1   = 0x05,
+  CMD_HAZARDS_ON  = 0x06,
+  CMD_HAZARDS_OFF = 0x07,
+  CMD_PANIC_ON    = 0x08,
+  CMD_PANIC_OFF   = 0x09,
+  CMD_ALARM_ACK   = 0x0A,   // clear the "alarm went off" warning
 };
 
 enum Result : uint8_t {
@@ -53,6 +58,11 @@ static const uint8_t FLAG_RUNNING      = 0x01;
 static const uint8_t FLAG_RUN_WIRED    = 0x02;
 static const uint8_t FLAG_LOCK_KNOWN   = 0x04;
 static const uint8_t FLAG_LOCKED       = 0x08;
+static const uint8_t FLAG_HAZARDS      = 0x10;
+static const uint8_t FLAG_PANIC        = 0x20;
+static const uint8_t FLAG_ALARM        = 0x40;   // alarm went off, not yet acknowledged
+static const uint8_t FLAG_ALARM_WIRED  = 0x80;
+static const size_t  STATUS_LEN        = 10;
 
 static const size_t NONCE_LEN = 16;
 static const size_t MAC_LEN   = 16;   // truncated HMAC-SHA256
@@ -79,7 +89,12 @@ static bool     lockKnown       = false;
 static bool     locked          = false;
 static uint8_t  lastResult      = RES_NONE;
 static uint8_t  commandSeq      = 0;
-static uint8_t  lastStatusSent[6] = {0};
+static uint8_t  lastStatusSent[STATUS_LEN] = {0};
+static bool     hazardsOn       = false;
+static uint32_t hazardsOffAtMs  = 0;
+static bool     panicOn         = false;
+static uint32_t panicEndMs      = 0;
+static bool     alarmTriggered  = false;
 
 // ---- Helpers --------------------------------------------------------------
 static int hexNibble(char c) {
@@ -174,24 +189,40 @@ static uint16_t secondsRemaining() {
   return (uint16_t)((runTimeMs() - elapsed) / 1000UL);
 }
 
-// Status packet: [ver=1][flags][secsRemaining LE16][lastResult][commandSeq]
+static uint16_t secondsUntil(uint32_t atMs) {
+  int32_t left = (int32_t)(atMs - millis());
+  if (left <= 0) return 0;
+  left /= 1000;
+  return left > 0xFFFF ? 0xFFFF : (uint16_t)left;
+}
+
+// Status packet:
+// [ver=1][flags][secsRemaining LE16][lastResult][commandSeq][hazard secs LE16][panic secs LE16]
 static void buildStatus(uint8_t* p) {
   uint8_t flags = 0;
   if (engineRunning)    flags |= FLAG_RUNNING;
   if (runStatusWired()) flags |= FLAG_RUN_WIRED;
   if (lockKnown)        flags |= FLAG_LOCK_KNOWN;
   if (locked)           flags |= FLAG_LOCKED;
+  if (hazardsOn)        flags |= FLAG_HAZARDS;
+  if (panicOn)          flags |= FLAG_PANIC;
+  if (alarmTriggered)   flags |= FLAG_ALARM;
+  if (PIN_ALARM_INPUT >= 0) flags |= FLAG_ALARM_WIRED;
   uint16_t secs = secondsRemaining();
+  uint16_t hz = hazardsOn ? secondsUntil(hazardsOffAtMs) : 0;
+  uint16_t pn = panicOn ? secondsUntil(panicEndMs) : 0;
   p[0] = 1;
   p[1] = flags;
   p[2] = secs & 0xFF;
   p[3] = secs >> 8;
   p[4] = lastResult;
   p[5] = commandSeq;
+  p[6] = hz & 0xFF; p[7] = hz >> 8;
+  p[8] = pn & 0xFF; p[9] = pn >> 8;
 }
 
 static void publishStatus(bool force) {
-  uint8_t p[6];
+  uint8_t p[STATUS_LEN];
   buildStatus(p);
   if (!force && memcmp(p, lastStatusSent, sizeof(p)) == 0) return;
   memcpy(lastStatusSent, p, sizeof(p));
@@ -304,6 +335,13 @@ static void obdLoop() {
 #endif
 }
 
+// ---- Hazard / panic timers and the alarm input ------------------------------
+static void updateHazardsAndAlarm() {
+  if (hazardsOn && secondsUntil(hazardsOffAtMs) == 0) { pulse(PIN_HAZARD); hazardsOn = false; }
+  if (panicOn && secondsUntil(panicEndMs) == 0)       { pulse(PIN_PANIC);  panicOn = false; }
+  if (PIN_ALARM_INPUT >= 0 && digitalRead(PIN_ALARM_INPUT) == ALARM_ACTIVE_LEVEL) alarmTriggered = true;
+}
+
 // ---- Command execution (runs in loop(), never inside a BLE callback) ------
 static uint8_t execute(uint8_t cmd) {
   updateEngineState();
@@ -318,6 +356,7 @@ static uint8_t execute(uint8_t cmd) {
       if (PIN_UNLOCK < 0) return RES_UNSUPPORTED;
       pulse(PIN_UNLOCK);
       lockKnown = true; locked = false;
+      alarmTriggered = false;   // owner is back: clear the warning
       return RES_OK;
 
     case CMD_START:
@@ -344,6 +383,32 @@ static uint8_t execute(uint8_t cmd) {
       if (PIN_AUX1 < 0) return RES_UNSUPPORTED;
       if (!engineRunning) return RES_NOT_RUNNING;
       pulse(PIN_AUX1);
+      return RES_OK;
+
+    case CMD_HAZARDS_ON:
+      if (PIN_HAZARD < 0) return RES_UNSUPPORTED;
+      if (!hazardsOn) { pulse(PIN_HAZARD); hazardsOn = true; }
+      hazardsOffAtMs = millis() + (uint32_t)HAZARD_AUTO_OFF_MIN * 60000UL;  // (re)start the timer
+      return RES_OK;
+
+    case CMD_HAZARDS_OFF:
+      if (PIN_HAZARD < 0) return RES_UNSUPPORTED;
+      if (hazardsOn) { pulse(PIN_HAZARD); hazardsOn = false; }
+      return RES_OK;
+
+    case CMD_PANIC_ON:
+      if (PIN_PANIC < 0) return RES_UNSUPPORTED;
+      if (!panicOn) { pulse(PIN_PANIC); panicOn = true; }
+      panicEndMs = millis() + (uint32_t)PANIC_SECONDS * 1000UL;
+      return RES_OK;
+
+    case CMD_PANIC_OFF:
+      if (PIN_PANIC < 0) return RES_UNSUPPORTED;
+      if (panicOn) { pulse(PIN_PANIC); panicOn = false; }
+      return RES_OK;
+
+    case CMD_ALARM_ACK:
+      alarmTriggered = false;
       return RES_OK;
 
     default:
@@ -419,7 +484,10 @@ void setup() {
   setOutputIdle(PIN_START);
   setOutputIdle(PIN_STOP);
   setOutputIdle(PIN_AUX1);
+  setOutputIdle(PIN_HAZARD);
+  setOutputIdle(PIN_PANIC);
   if (runStatusWired()) pinMode(PIN_RUN_STATUS, INPUT_PULLUP);
+  if (PIN_ALARM_INPUT >= 0) pinMode(PIN_ALARM_INPUT, INPUT_PULLUP);
 
   if (!parseSecret(EMBER_SECRET_HEX, secretKey)) {
     Serial.println("ERROR: EMBER_SECRET_HEX in config.h is not 64 hex characters. Halting.");
@@ -497,6 +565,7 @@ void loop() {
   if (millis() - lastTick >= 1000) {
     lastTick = millis();
     updateEngineState();
+    updateHazardsAndAlarm();
     publishStatus(false);  // only notifies when something changed (e.g. countdown)
     publishVehicle(false); // e.g. "updated N min ago" ticking over
   }

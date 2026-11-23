@@ -24,6 +24,10 @@ struct ContentView: View {
                     .tabItem { Label("Remote", systemImage: "car.fill") }
                 VehicleView(showSettings: $showSettings)
                     .tabItem { Label("Vehicle", systemImage: "gauge.with.dots.needle.67percent") }
+                HazardsView(showSettings: $showSettings)
+                    .tabItem { Label("Hazards", systemImage: "exclamationmark.triangle.fill") }
+                AlarmView(showSettings: $showSettings)
+                    .tabItem { Label("Alarm", systemImage: "light.beacon.max.fill") }
             }
             .tint(Palette.accent)
 

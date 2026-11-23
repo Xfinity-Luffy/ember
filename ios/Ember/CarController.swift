@@ -16,6 +16,8 @@ final class CarController: ObservableObject {
     @Published private(set) var link: LinkState = .searching
     @Published private(set) var status = CarStatus()
     @Published private(set) var vehicle = VehicleInfo()
+    /// When this phone first saw the "alarm went off" warning.
+    @Published private(set) var alarmTriggeredAt: Date?
     @Published private(set) var pending: CarCommand?
     @Published private(set) var hasKey = SecretStore.load() != nil
     @Published var banner: Banner?
@@ -114,9 +116,18 @@ final class CarController: ObservableObject {
         return "\(v) (\(b))"
     }
 
+    /// Demo mode only: pretend the alarm went off so the Alarm tab can be tried out.
+    func simulateAlarm() {
+        (transport as? DemoTransport)?.simulateAlarm()
+    }
+
     /// Explains the hold gesture when someone just taps the power button.
-    func holdHint() {
+    func holdHint(panic: Bool = false) {
         Haptics.tap()
+        if panic {
+            show("Press and hold for one second to sound the panic alarm. This prevents accidental alarms.", kind: .info)
+            return
+        }
         show(status.engineRunning
              ? "Press and hold for one second to stop the engine."
              : "Press and hold for one second to start. This prevents accidental starts.",
@@ -146,6 +157,11 @@ final class CarController: ObservableObject {
         case .start: return status.runStatusWired ? "Start sent to the car" : "Engine started"
         case .stop: return "Engine off"
         case .aux1: return "Rear defrost turned on"
+        case .hazardsOn: return "Hazard lights on"
+        case .hazardsOff: return "Hazard lights off"
+        case .panicOn: return "Panic alarm on"
+        case .panicOff: return "Panic alarm stopped"
+        case .alarmAck: return "Alarm warning cleared"
         }
     }
 
@@ -175,7 +191,16 @@ final class CarController: ObservableObject {
             ? DemoTransport()
             : BLETransport(secret: { SecretStore.load().map { SymmetricKey(data: $0) } })
         t.onLinkChange = { [weak self] in self?.link = $0 }
-        t.onStatus = { [weak self] in self?.status = $0 }
+        t.onStatus = { [weak self] new in
+            guard let self else { return }
+            if new.alarmTriggered && !self.status.alarmTriggered {
+                self.alarmTriggeredAt = Date()
+                Haptics.error()
+                self.show("Your car alarm went off. Open the Alarm tab for details.", kind: .error)
+            }
+            if !new.alarmTriggered { self.alarmTriggeredAt = nil }
+            self.status = new
+        }
         t.onError = { [weak self] in self?.show($0, kind: .error) }
         t.onVehicle = { [weak self] in self?.vehicle = $0 }
         transport = t

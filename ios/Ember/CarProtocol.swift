@@ -33,6 +33,11 @@ enum CarCommand: UInt8, CaseIterable {
     case start = 0x03
     case stop = 0x04
     case aux1 = 0x05   // rear defrost by default
+    case hazardsOn = 0x06
+    case hazardsOff = 0x07
+    case panicOn = 0x08
+    case panicOff = 0x09
+    case alarmAck = 0x0A  // clear the "alarm went off" warning
 
     var verb: String {
         switch self {
@@ -41,6 +46,11 @@ enum CarCommand: UInt8, CaseIterable {
         case .start: return "Starting"
         case .stop: return "Stopping"
         case .aux1: return "Defrost"
+        case .hazardsOn: return "Hazards on"
+        case .hazardsOff: return "Hazards off"
+        case .panicOn: return "Panic"
+        case .panicOff: return "Stopping panic"
+        case .alarmAck: return "Clearing alarm"
         }
     }
 }
@@ -70,8 +80,17 @@ struct CarStatus: Equatable {
     var secondsRemaining = 0
     var lastResult: CommandResult = .none
     var sequence: UInt8 = 0
+    var hazardsOn = false
+    var hazardSecondsRemaining = 0
+    var panicOn = false
+    var panicSecondsRemaining = 0
+    /// The alarm went off and nobody has acknowledged it yet.
+    var alarmTriggered = false
+    /// The bridge has the "alarm triggered" input wired.
+    var alarmWired = false
 
-    /// Status packet: [ver=1][flags][secs LE16][lastResult][seq]
+    /// Status packet: [ver=1][flags][secs LE16][lastResult][seq][hazard secs LE16][panic secs LE16]
+    /// (older bridges send only the first 6 bytes)
     init() {}
     init?(packet d: Data) {
         let b = [UInt8](d)
@@ -83,6 +102,14 @@ struct CarStatus: Equatable {
         secondsRemaining = Int(b[2]) | (Int(b[3]) << 8)
         lastResult = CommandResult(rawValue: b[4]) ?? .none
         sequence = b[5]
+        hazardsOn = flags & 0x10 != 0
+        panicOn = flags & 0x20 != 0
+        alarmTriggered = flags & 0x40 != 0
+        alarmWired = flags & 0x80 != 0
+        if b.count >= 10 {
+            hazardSecondsRemaining = Int(b[6]) | (Int(b[7]) << 8)
+            panicSecondsRemaining = Int(b[8]) | (Int(b[9]) << 8)
+        }
     }
 }
 
