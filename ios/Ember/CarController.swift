@@ -69,6 +69,8 @@ final class CarController: ObservableObject {
         vehicles.first { $0.id == selectedVehicleID } ?? vehicles.first ?? Vehicle(name: "My Car")
     }
     var canAddVehicle: Bool { vehicles.count < Vehicle.maxCount }
+    /// False on first launch and after the last vehicle is removed (shows the welcome screen).
+    var hasVehicles: Bool { !vehicles.isEmpty }
 
     var carName: String {
         get { selectedVehicle.name }
@@ -190,6 +192,7 @@ final class CarController: ObservableObject {
     /// Runs a command for Siri / Shortcuts / a widget and returns what to say.
     /// The system has already asked for Face ID or the passcode where needed.
     func runForShortcut(_ command: CarCommand, source: ActivityEntry.Source) async -> (ok: Bool, message: String) {
+        guard hasVehicles else { return (false, "Add a vehicle in Ember first.") }
         if command == .start, !status.engineRunning, vehicle.batteryIsLow, let v = vehicle.batteryVolts {
             let text = "The battery is low (\(String(format: "%.1f", v)) V), so I didn't start \(carName). Open Ember to start it anyway."
             ActivityLog.shared.add(ActivityEntry(date: Date(), vehicle: carName, action: "Start",
@@ -230,6 +233,7 @@ final class CarController: ObservableObject {
 
     /// Waits briefly for the car to report in, then summarizes it.
     func statusForShortcut() async -> String {
+        guard hasVehicles else { return "You haven't added a vehicle in Ember yet." }
         guard await waitUntilConnected(seconds: 15) else { return "Couldn't reach \(carName). \(link.label)." }
         if status.lock == .unknown && !status.engineRunning {
             try? await Task.sleep(nanoseconds: 1_000_000_000)   // first status arrives right after connecting
@@ -385,14 +389,20 @@ final class CarController: ObservableObject {
     private func loadVehicles() {
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: Keys.vehicles),
-           let saved = try? JSONDecoder().decode([Vehicle].self, from: data), !saved.isEmpty {
+           let saved = try? JSONDecoder().decode([Vehicle].self, from: data) {
             vehicles = saved
             if let idString = defaults.string(forKey: Keys.selected), let id = UUID(uuidString: idString),
                saved.contains(where: { $0.id == id }) {
                 selectedVehicleID = id
-            } else {
-                selectedVehicleID = saved[0].id
+            } else if let first = saved.first {
+                selectedVehicleID = first.id
             }
+        } else if defaults.string(forKey: Keys.name) == nil,
+                  SecretStore.load(account: SecretStore.legacyAccount) == nil,
+                  defaults.string(forKey: "ember.bridgePeripheralID") == nil {
+            // Brand-new install: start with no vehicles (the welcome screen).
+            vehicles = []
+            saveVehicles()
         } else {
             // First run of the multi-car version: keep everything about the existing car.
             var first = Vehicle(name: defaults.string(forKey: Keys.name) ?? "My Car")
@@ -411,6 +421,7 @@ final class CarController: ObservableObject {
             }
             vehicles = [first]
             selectedVehicleID = first.id
+            defaults.removeObject(forKey: Keys.name)
             saveVehicles()
         }
         hasKey = SecretStore.load(account: selectedVehicle.keychainAccount) != nil
@@ -483,17 +494,31 @@ final class CarController: ObservableObject {
 
     /// Removes a car and everything stored for it. The last car can't be removed.
     func deleteVehicle(_ id: UUID) {
-        guard vehicles.count > 1, let v = vehicles.first(where: { $0.id == id }) else { return }
+        guard let v = vehicles.first(where: { $0.id == id }) else { return }
         SecretStore.delete(account: v.keychainAccount)
         UserDefaults.standard.removeObject(forKey: v.peripheralKey)
         UserDefaults.standard.removeObject(forKey: v.spotKey)
         vehicles.removeAll { $0.id == id }
-        if id == selectedVehicleID {
-            selectedVehicleID = vehicles[0].id
+        if let next = vehicles.first, id == selectedVehicleID {
+            selectedVehicleID = next.id
             hasKey = SecretStore.load(account: selectedVehicle.keychainAccount) != nil
             rebuildTransport()
+        } else if vehicles.isEmpty {
+            hasKey = false
+            alarmTriggeredAt = nil
+            rebuildTransport()     // stops talking to any bridge
         }
         saveVehicles()
+    }
+
+    /// "Try the demo car" on the welcome screen: a pretend car to explore with.
+    func addDemoVehicle() {
+        var demo = Vehicle(name: "Demo car")
+        demo.type = .hatchback
+        demo.color = .red
+        demo.year = "2021"
+        if !demoMode { demoMode = true }
+        _ = addVehicle(demo, keyHex: "")
     }
 
     // MARK: Lifecycle
@@ -509,6 +534,15 @@ final class CarController: ObservableObject {
 
     private func rebuildTransport() {
         transport?.stop()
+        guard hasVehicles else {
+            transport = nil
+            status = CarStatus()
+            vehicle = VehicleInfo()
+            cellular = nil
+            link = .searching
+            RunningActivity.end()
+            return
+        }
         let current = selectedVehicle
         let key = { SecretStore.load(account: current.keychainAccount).map { SymmetricKey(data: $0) } }
         let t: CarTransport

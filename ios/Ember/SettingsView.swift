@@ -20,8 +20,10 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(spacing: 22) {
                         carSection
-                        connectionSection
-                        if !car.demoMode || !car.hasKey { keySection }
+                        if car.hasVehicles {
+                            connectionSection
+                            if !car.demoMode || !car.hasKey { keySection }
+                        }
                         securitySection
                         startSection
                         smartSection
@@ -62,13 +64,16 @@ struct SettingsView: View {
     // MARK: Sections
 
     private var carSection: some View {
-        SettingsSection("Vehicles", footer: "Connection and bridge key below apply to \(car.carName). Each vehicle keeps its own.") {
+        SettingsSection("Vehicles", footer: car.hasVehicles
+                        ? "Connection and bridge key below apply to \(car.carName). Each vehicle keeps its own."
+                        : "Add a vehicle to set up its connection and bridge key.") {
             Button { showVehicles = true } label: {
                 HStack(spacing: 14) {
                     RowIcon("car.2.fill", Palette.accent)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(car.carName).font(.body.weight(.medium))
-                        Text("\(car.vehicles.count) of \(Vehicle.maxCount) vehicles · switch, add or edit")
+                        Text(car.hasVehicles ? car.carName : "No vehicles yet").font(.body.weight(.medium))
+                        Text(car.hasVehicles ? "\(car.vehicles.count) of \(Vehicle.maxCount) vehicles · switch, add or edit"
+                                             : "Add up to \(Vehicle.maxCount)")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     Spacer()

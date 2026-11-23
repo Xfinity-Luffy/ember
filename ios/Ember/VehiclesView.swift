@@ -172,7 +172,7 @@ struct VehicleEditView: View {
 
                         keySection
 
-                        if !isNew && car.vehicles.count > 1 {
+                        if !isNew {
                             Button(role: .destructive) { confirmDelete = true } label: {
                                 Label("Remove this vehicle", systemImage: "trash")
                                     .font(.subheadline.weight(.semibold))
@@ -213,7 +213,9 @@ struct VehicleEditView: View {
                     dismiss()
                 }
             } message: {
-                Text("Its key, remembered bridge and parking spot are deleted from this iPhone.")
+                Text(car.vehicles.count == 1
+                     ? "It's your only vehicle, so Ember goes back to the welcome screen. Its key, remembered bridge and parking spot are deleted from this iPhone."
+                     : "Its key, remembered bridge and parking spot are deleted from this iPhone.")
             }
         }
     }

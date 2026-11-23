@@ -23,6 +23,10 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
+            if !car.hasVehicles {
+                WelcomeView(showSettings: $showSettings)
+                    .transition(.opacity)
+            } else {
             TabView(selection: $car.selectedTab) {
                 RemoteView(showSettings: $showSettings)
                     .tabItem { Label("Home", systemImage: "car.side.fill") }
@@ -43,15 +47,17 @@ struct ContentView: View {
                     .tag(AppTab.location)
             }
             .tint(Palette.accent)
+            }
 
             if let banner = car.banner {
                 BannerView(banner: banner)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 70)      // sits just above the tab bar
+                    .padding(.bottom, car.hasVehicles ? 70 : 24)      // sits just above the tab bar
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.spring(duration: 0.35), value: car.banner)
+        .animation(.easeInOut(duration: 0.3), value: car.hasVehicles)
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(car) }
         .sheet(isPresented: $car.showingVehicles) { VehiclesView().environmentObject(car) }
         .onOpenURL { url in handleLink(url) }
@@ -65,7 +71,7 @@ struct ContentView: View {
 
     /// ember://lock, unlock, start, location, home (from widgets and the Live Activity).
     private func handleLink(_ url: URL) {
-        guard url.scheme == EmberLink.scheme else { return }
+        guard url.scheme == EmberLink.scheme, car.hasVehicles else { return }
         showSettings = false
         car.showingVehicles = false
         switch url.host ?? "" {
