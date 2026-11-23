@@ -15,6 +15,7 @@ enum Palette {
 
 struct ContentView: View {
     @EnvironmentObject private var car: CarController
+    @EnvironmentObject private var locator: CarLocator
     @State private var showSettings = false
 
     var body: some View {
@@ -34,6 +35,9 @@ struct ContentView: View {
                     .tabItem { Label("Alarm", systemImage: "light.beacon.max.fill") }
                     .tag(AppTab.alarm)
                     .badge(car.status.alarmTriggered || car.status.panicOn ? Text("!") : nil)
+                LocationView(showSettings: $showSettings)
+                    .tabItem { Label("Location", systemImage: "location.fill") }
+                    .tag(AppTab.location)
             }
             .tint(Palette.accent)
 
@@ -46,6 +50,10 @@ struct ContentView: View {
         }
         .animation(.spring(duration: 0.35), value: car.banner)
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(car) }
+        // While the app is connected to the bridge, the phone is at the car:
+        // let the locator keep the car's spot up to date.
+        .onAppear { locator.nearCar = car.link == .ready && !car.demoMode }
+        .onChange(of: car.link) { _, link in locator.nearCar = link == .ready && !car.demoMode }
     }
 }
 

@@ -10,7 +10,7 @@ struct Banner: Identifiable, Equatable {
     let kind: Kind
 }
 
-enum AppTab: Hashable { case remote, vehicle, hazards, alarm }
+enum AppTab: Hashable { case remote, vehicle, hazards, alarm, location }
 
 /// The app's single source of truth: link state, car status, and commands.
 @MainActor

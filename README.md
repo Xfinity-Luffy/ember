@@ -20,6 +20,7 @@ Ember lets your iPhone lock, unlock, start and stop your car over Bluetooth, and
 - **Vehicle tab:** a fuel gauge read from the car's diagnostic port (OBD-II), and a tire-pressure diagram that flags low tires (tire readings need extra work, see Wiring).
 - **Hazards tab:** a big blinking triangle to turn the hazard lights on or off, with an automatic 10-minute shut-off.
 - **Alarm tab:** armed or not (from the lock state), a warning when the alarm went off, and a press-and-hold panic button.
+- **Location tab:** a live map of where your car is. While the app is connected to the bridge, your phone is at the car, so the car's spot updates live; after you walk away it keeps the last spot with the address, how long ago, how far you are, and walking directions. No extra hardware, and the location never leaves your iPhone. (Tracking the car from anywhere, e.g. if it's stolen, would need a GPS + cellular board in the car.)
 - **Settings:** car name, demo mode, connection status, bridge key, Face ID for Unlock and Start, defrost with every start, vibration feedback, "Find my bridge again", and pairing help.
 
 ---

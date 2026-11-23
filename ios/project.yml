@@ -18,6 +18,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSBluetoothAlwaysUsageDescription: Ember connects to your car's bridge over Bluetooth.
+        NSLocationWhenInUseUsageDescription: Ember uses your location to remember where your car is parked and show how far away it is.
         NSFaceIDUsageDescription: Ember uses Face ID to confirm it's you before unlocking or starting the car.
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
