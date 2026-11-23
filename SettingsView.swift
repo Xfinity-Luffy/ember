@@ -57,6 +57,9 @@ struct SettingsView: View {
                 TextField("Car name", text: $car.carName)
                     .font(.body.weight(.medium))
                     .submitLabel(.done)
+                    .onChange(of: car.carName) { _, name in
+                        if name.count > 40 { car.carName = String(name.prefix(40)) }
+                    }
             }
         }
     }

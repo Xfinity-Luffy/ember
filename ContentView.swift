@@ -55,10 +55,16 @@ struct ContentView: View {
     // MARK: Header
 
     private var header: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 12) {
+            // Long names wrap onto a second line (then shrink a little, then end in "…")
+            // instead of pushing the settings button out of place.
             Text(car.carName)
                 .font(.system(size: 30, weight: .bold, design: .rounded))
-            Spacer()
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button { showSettings = true } label: {
                 Image(systemName: "gearshape.fill")
                     .font(.title3)
@@ -66,6 +72,8 @@ struct ContentView: View {
                     .glass(Circle(), interactive: true)
             }
             .foregroundStyle(.secondary)
+            .fixedSize()            // never squeezed, always top-right
+            .layoutPriority(1)
             .accessibilityLabel("Settings")
         }
         .padding(.top, 12)
