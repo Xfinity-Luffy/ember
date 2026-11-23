@@ -15,6 +15,7 @@ struct Banner: Identifiable, Equatable {
 final class CarController: ObservableObject {
     @Published private(set) var link: LinkState = .searching
     @Published private(set) var status = CarStatus()
+    @Published private(set) var vehicle = VehicleInfo()
     @Published private(set) var pending: CarCommand?
     @Published private(set) var hasKey = SecretStore.load() != nil
     @Published var banner: Banner?
@@ -176,8 +177,10 @@ final class CarController: ObservableObject {
         t.onLinkChange = { [weak self] in self?.link = $0 }
         t.onStatus = { [weak self] in self?.status = $0 }
         t.onError = { [weak self] in self?.show($0, kind: .error) }
+        t.onVehicle = { [weak self] in self?.vehicle = $0 }
         transport = t
         status = CarStatus()
+        vehicle = VehicleInfo()
         link = demoMode ? .demo : .searching
         t.start()
     }

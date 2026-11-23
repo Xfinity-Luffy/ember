@@ -7,6 +7,7 @@ final class DemoTransport: CarTransport {
     var onLinkChange: ((LinkState) -> Void)?
     var onStatus: ((CarStatus) -> Void)?
     var onError: ((String) -> Void)?
+    var onVehicle: ((VehicleInfo) -> Void)?
 
     private var status = CarStatus()
     private var ticker: Task<Void, Never>?
@@ -20,6 +21,9 @@ final class DemoTransport: CarTransport {
     func start() {
         onLinkChange?(.demo)
         onStatus?(status)
+        // Sample readings so the Vehicle tab has something to show (one tire a bit low).
+        onVehicle?(VehicleInfo(fuelPercent: 62, fuelAgeMinutes: 14,
+                               tiresPSI: [36.0, 35.5, 36.0, 29.5], tiresAgeMinutes: 14))
         ticker?.cancel()
         ticker = Task { [weak self] in
             while !Task.isCancelled {

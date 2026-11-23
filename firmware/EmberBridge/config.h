@@ -60,3 +60,18 @@
 // ---------------------------------------------------------------------------
 #define MAX_BAD_AUTH         5      // bad keys in a row before lockout
 #define LOCKOUT_SECONDS      60
+
+// ---------------------------------------------------------------------------
+//  Vehicle info (Vehicle tab in the app) — read from the car's OBD-II port.
+//  Needs a 3.3 V CAN transceiver (e.g. SN65HVD230) wired to the OBD-II port:
+//  CANH = pin 6, CANL = pin 14. Read-only: the bridge only sends standard
+//  diagnostic requests and never changes anything in the car.
+//  Set OBD_ENABLED to 0 if you haven't wired it.
+// ---------------------------------------------------------------------------
+#define OBD_ENABLED          1
+#define PIN_CAN_TX           21   // to transceiver CTX / TXD
+#define PIN_CAN_RX           22   // to transceiver CRX / RXD
+#define FUEL_POLL_SECONDS    30   // how often to ask for fuel level while the car is on
+
+// The bridge only asks the car for data while it's awake (engine running, or
+// other traffic seen on the bus), so it never keeps a parked car's modules up.

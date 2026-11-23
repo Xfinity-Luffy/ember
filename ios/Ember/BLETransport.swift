@@ -32,6 +32,7 @@ final class BLETransport: NSObject, CarTransport {
     var onLinkChange: ((LinkState) -> Void)?
     var onStatus: ((CarStatus) -> Void)?
     var onError: ((String) -> Void)?
+    var onVehicle: ((VehicleInfo) -> Void)?
 
     private let secret: () -> SymmetricKey?
     private var central: CBCentralManager?
@@ -39,6 +40,7 @@ final class BLETransport: NSObject, CarTransport {
     private var challengeChar: CBCharacteristic?
     private var commandChar: CBCharacteristic?
     private var statusChar: CBCharacteristic?
+    private var vehicleChar: CBCharacteristic?
     private var latestStatus: CarStatus?
     private var wantsConnection = false
     private var commandInFlight = false
@@ -144,6 +146,7 @@ final class BLETransport: NSObject, CarTransport {
         challengeChar = nil
         commandChar = nil
         statusChar = nil
+        vehicleChar = nil
         latestStatus = nil
     }
 
@@ -224,7 +227,7 @@ extension BLETransport: @preconcurrency CBPeripheralDelegate {
             return
         }
         peripheral.discoverCharacteristics(
-            [EmberProtocol.challenge, EmberProtocol.command, EmberProtocol.status], for: service)
+            [EmberProtocol.challenge, EmberProtocol.command, EmberProtocol.status, EmberProtocol.vehicle], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -233,6 +236,7 @@ extension BLETransport: @preconcurrency CBPeripheralDelegate {
             case EmberProtocol.challenge: challengeChar = c
             case EmberProtocol.command: commandChar = c
             case EmberProtocol.status: statusChar = c
+            case EmberProtocol.vehicle: vehicleChar = c
             default: break
             }
         }
@@ -244,6 +248,10 @@ extension BLETransport: @preconcurrency CBPeripheralDelegate {
         // the first time. The link only counts as ready once that read succeeds.
         peripheral.setNotifyValue(true, for: statusChar)
         peripheral.readValue(for: statusChar)
+        if let vehicleChar {   // older bridge firmware doesn't have this; that's fine
+            peripheral.setNotifyValue(true, for: vehicleChar)
+            peripheral.readValue(for: vehicleChar)
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
@@ -254,6 +262,13 @@ extension BLETransport: @preconcurrency CBPeripheralDelegate {
                 readWaiter?.finish(.success(characteristic.value ?? Data()))
             }
             readWaiter = nil
+            return
+        }
+
+        if characteristic.uuid == EmberProtocol.vehicle {
+            if error == nil, let data = characteristic.value, let info = VehicleInfo(packet: data) {
+                onVehicle?(info)
+            }
             return
         }
 

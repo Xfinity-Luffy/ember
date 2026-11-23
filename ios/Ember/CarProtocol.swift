@@ -9,6 +9,7 @@ enum EmberProtocol {
     static let challenge = CBUUID(string: "19761279-973c-47a5-8d3d-08d03f22677c")
     static let command   = CBUUID(string: "6a4d6a66-0fe9-48ca-878e-238060417a9d")
     static let status    = CBUUID(string: "7bdb2e96-9fcf-4522-b098-7264afa1c44d")
+    static let vehicle   = CBUUID(string: "c8877ecc-75f8-4914-a91b-f18cdebf0910")   // optional (newer bridges)
 
     static let nonceLength = 16
     static let macLength = 16
@@ -85,6 +86,40 @@ struct CarStatus: Equatable {
     }
 }
 
+/// Fuel and tire readings from the car (Vehicle tab).
+struct VehicleInfo: Equatable {
+    var fuelPercent: Int?
+    var fuelAgeMinutes: Int?
+    /// Front-left, front-right, rear-left, rear-right, in psi.
+    var tiresPSI: [Double]?
+    var tiresAgeMinutes: Int?
+
+    init() {}
+    init(fuelPercent: Int?, fuelAgeMinutes: Int?, tiresPSI: [Double]?, tiresAgeMinutes: Int?) {
+        self.fuelPercent = fuelPercent
+        self.fuelAgeMinutes = fuelAgeMinutes
+        self.tiresPSI = tiresPSI
+        self.tiresAgeMinutes = tiresAgeMinutes
+    }
+
+    /// Vehicle packet: [ver=1][flags][fuel %][fuel age min LE16][FL FR RL RR psi*10 LE16][tire age min LE16]
+    /// flags: bit0 fuel known, bit1 tires known. 0xFFFF = unknown.
+    init?(packet d: Data) {
+        let b = [UInt8](d)
+        guard b.count >= 15, b[0] == 1 else { return nil }
+        func u16(_ i: Int) -> Int { Int(b[i]) | (Int(b[i + 1]) << 8) }
+        if b[1] & 0x01 != 0 {
+            fuelPercent = min(100, Int(b[2]))
+            fuelAgeMinutes = u16(3) == 0xFFFF ? nil : u16(3)
+        }
+        if b[1] & 0x02 != 0 {
+            let raw = [u16(5), u16(7), u16(9), u16(11)]
+            if !raw.contains(0xFFFF) { tiresPSI = raw.map { Double($0) / 10 } }
+            tiresAgeMinutes = u16(13) == 0xFFFF ? nil : u16(13)
+        }
+    }
+}
+
 enum LinkState: Equatable {
     case bluetoothOff
     case unauthorized
@@ -127,6 +162,7 @@ protocol CarTransport: AnyObject {
     var onLinkChange: ((LinkState) -> Void)? { get set }
     var onStatus: ((CarStatus) -> Void)? { get set }
     var onError: ((String) -> Void)? { get set }
+    var onVehicle: ((VehicleInfo) -> Void)? { get set }
     func start()
     func stop()
     /// Sends a command and returns once the bridge reports a result.

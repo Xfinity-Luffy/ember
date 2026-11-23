@@ -11,16 +11,44 @@ enum Palette {
     static let stroke = Color.white.opacity(0.10)
 }
 
-// MARK: - Main screen
+// MARK: - App shell: two tabs, one banner, one settings sheet
 
 struct ContentView: View {
     @EnvironmentObject private var car: CarController
     @State private var showSettings = false
 
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            TabView {
+                RemoteView(showSettings: $showSettings)
+                    .tabItem { Label("Remote", systemImage: "car.fill") }
+                VehicleView(showSettings: $showSettings)
+                    .tabItem { Label("Vehicle", systemImage: "gauge.with.dots.needle.67percent") }
+            }
+            .tint(Palette.accent)
+
+            if let banner = car.banner {
+                BannerView(banner: banner)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 64)      // sits just above the tab bar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.35), value: car.banner)
+        .sheet(isPresented: $showSettings) { SettingsView().environmentObject(car) }
+    }
+}
+
+// MARK: - Remote tab
+
+struct RemoteView: View {
+    @EnvironmentObject private var car: CarController
+    @Binding var showSettings: Bool
+
     private var ready: Bool { car.link.isUsable && car.pending == nil }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             EmberBackground(running: car.status.engineRunning)
 
             ScrollView {
@@ -39,17 +67,8 @@ struct ContentView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 110)
             }
-
-            if let banner = car.banner {
-                BannerView(banner: banner)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
         }
-        .animation(.spring(duration: 0.35), value: car.banner)
         .animation(.easeInOut(duration: 0.25), value: car.status)
-        .sheet(isPresented: $showSettings) { SettingsView().environmentObject(car) }
     }
 
     // MARK: Header
@@ -65,16 +84,7 @@ struct ContentView: View {
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Button { showSettings = true } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.title3)
-                    .frame(width: 44, height: 44)
-                    .glass(Circle(), interactive: true)
-            }
-            .foregroundStyle(.secondary)
-            .fixedSize()            // never squeezed, always top-right
-            .layoutPriority(1)
-            .accessibilityLabel("Settings")
+            SettingsButton { showSettings = true }
         }
         .padding(.top, 12)
     }
@@ -382,4 +392,23 @@ struct BannerView: View {
     ContentView()
         .environmentObject(CarController())
         .preferredColorScheme(.dark)
+}
+
+// MARK: - Shared header button
+
+struct SettingsButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "gearshape.fill")
+                .font(.title3)
+                .frame(width: 44, height: 44)
+                .glass(Circle(), interactive: true)
+        }
+        .foregroundStyle(.secondary)
+        .fixedSize()            // never squeezed, always top-right
+        .layoutPriority(1)
+        .accessibilityLabel("Settings")
+    }
 }

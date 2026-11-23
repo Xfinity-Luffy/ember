@@ -17,6 +17,7 @@ Ember lets your iPhone lock, unlock, start and stop your car over Bluetooth, and
 
 - **Main screen:** a status card in plain English, a press-and-hold power button (a quick tap explains the gesture), an "Also turn on rear defrost" switch, and Lock / Unlock with the current state checked.
 - **Look:** Liquid Glass on iOS 26 (frosted glass on iOS 17–18) over a slowly drifting night-sky background that glows warmer while the engine runs.
+- **Vehicle tab:** a fuel gauge read from the car's diagnostic port (OBD-II), and a tire-pressure diagram that flags low tires (tire readings need extra work, see Wiring).
 - **Settings:** car name, demo mode, connection status, bridge key, Face ID for Unlock and Start, defrost with every start, vibration feedback, "Find my bridge again", and pairing help.
 
 ---
@@ -102,6 +103,18 @@ Hold the big power button for one second to "start" the demo car.
 ```
 
 Pin numbers are set in `config.h`, so you can change them. Never connect 12 V directly to an ESP32 pin.
+
+**Optional: fuel level for the Vehicle tab.** Add a 3.3 V CAN transceiver board (SN65HVD230, about $5) and an OBD-II splitter or pigtail cable, so you never cut the car's wiring:
+
+```
+ ESP32 3.3V ──▶ transceiver 3V3        ESP32 GND ──▶ transceiver GND
+ ESP32 GPIO21 ──▶ transceiver CTX      ESP32 GPIO22 ──▶ transceiver CRX
+ transceiver CANH ──▶ OBD-II pin 6     transceiver CANL ──▶ OBD-II pin 14
+```
+
+The bridge only *reads*: it sends the standard "fuel tank level" request and never changes anything in the car. It also only asks while the car is awake (engine running, or the car's own modules already talking), so it can't keep a parked car awake and drain the battery. The reading shows as "Updated N min ago" afterward. If you don't wire this, set `OBD_ENABLED` to `0` in `config.h`.
+
+**Tire pressure:** your 2021 Mazda3 has a sensor in each tire, but the car shares those readings only in a Mazda-specific format that isn't publicly documented. The Vehicle tab shows tire pressures in demo mode and is ready for real readings, but shows "Not set up yet" until the bridge learns that format.
 
 **Battery draw:** the bridge stays awake to listen for your phone, drawing roughly 30–60 mA. That's fine for a daily driver. If the car will sit for several weeks, unplug the bridge's fuse.
 

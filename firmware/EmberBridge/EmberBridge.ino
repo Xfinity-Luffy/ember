@@ -19,6 +19,7 @@
 #include <NimBLEDevice.h>
 #include "mbedtls/md.h"
 #include "esp_random.h"
+#include "driver/twai.h"
 #include "config.h"
 
 // ---- Protocol (must match CarProtocol.swift) ------------------------------
@@ -26,6 +27,7 @@ static const char* SERVICE_UUID   = "e1ff55ff-6a97-433b-bea8-9ec4b34f384e";
 static const char* CHALLENGE_UUID = "19761279-973c-47a5-8d3d-08d03f22677c";
 static const char* COMMAND_UUID   = "6a4d6a66-0fe9-48ca-878e-238060417a9d";
 static const char* STATUS_UUID    = "7bdb2e96-9fcf-4522-b098-7264afa1c44d";
+static const char* VEHICLE_UUID   = "c8877ecc-75f8-4914-a91b-f18cdebf0910";
 
 enum Command : uint8_t {
   CMD_LOCK   = 0x01,
@@ -65,6 +67,7 @@ static QueueHandle_t cmdQueue;
 
 static NimBLECharacteristic* challengeChar = nullptr;
 static NimBLECharacteristic* statusChar    = nullptr;
+static NimBLECharacteristic* vehicleChar   = nullptr;
 
 static volatile uint8_t  badAuthCount = 0;
 static volatile uint32_t lockoutUntilMs = 0;
@@ -194,6 +197,111 @@ static void publishStatus(bool force) {
   memcpy(lastStatusSent, p, sizeof(p));
   statusChar->setValue(p, sizeof(p));
   if (NimBLEDevice::getServer()->getConnectedCount() > 0) statusChar->notify();
+}
+
+
+// ---- Vehicle info: fuel level over OBD-II (read-only) ---------------------
+//  Vehicle packet (must match CarProtocol.swift):
+//  [ver=1][flags][fuel %][fuel age min LE16][FL FR RL RR tire psi*10 LE16 each][tire age min LE16]
+//  flags: bit0 fuel known, bit1 tires known. "Unknown" values are 0xFFFF.
+static const uint8_t VFLAG_FUEL  = 0x01;
+static const uint8_t VFLAG_TIRES = 0x02;
+static const size_t  VEHICLE_LEN = 15;
+
+static int16_t  fuelPercent    = -1;      // -1 = no reading yet
+static uint32_t fuelReadMs     = 0;
+static uint32_t lastBusFrameMs = 0;       // last time we saw ANY traffic from the car
+static uint32_t lastFuelAskMs  = 0;
+static bool     obdReady       = false;
+static uint8_t  lastVehicleSent[VEHICLE_LEN] = {0};
+
+static uint16_t minutesSince(uint32_t ms) {
+  uint32_t m = (millis() - ms) / 60000UL;
+  return m > 0xFFFE ? 0xFFFE : (uint16_t)m;
+}
+
+static void buildVehicle(uint8_t* p) {
+  memset(p, 0xFF, VEHICLE_LEN);
+  p[0] = 1;
+  p[1] = 0;
+  p[2] = 0;
+  if (fuelPercent >= 0) {
+    p[1] |= VFLAG_FUEL;
+    p[2] = (uint8_t)fuelPercent;
+    uint16_t age = minutesSince(fuelReadMs);
+    p[3] = age & 0xFF; p[4] = age >> 8;
+  }
+  // Tire pressures (p[5..12], p[13..14]) stay 0xFFFF until the Mazda-specific
+  // request for them is known. The app shows "not set up yet" in that case.
+}
+
+static void publishVehicle(bool force) {
+  if (!vehicleChar) return;
+  uint8_t p[VEHICLE_LEN];
+  buildVehicle(p);
+  if (!force && memcmp(p, lastVehicleSent, VEHICLE_LEN) == 0) return;
+  memcpy(lastVehicleSent, p, VEHICLE_LEN);
+  vehicleChar->setValue(p, VEHICLE_LEN);
+  if (NimBLEDevice::getServer()->getConnectedCount() > 0) vehicleChar->notify();
+}
+
+// Decode one received CAN frame. Returns true if it was a fuel-level answer.
+// OBD-II answer to "mode 01, PID 2F": ID 0x7E8..0x7EF, data [len][0x41][0x2F][A] -> A*100/255 %
+static bool handleObdFrame(uint32_t id, const uint8_t* d, uint8_t len) {
+  lastBusFrameMs = millis();
+  if (id < 0x7E8 || id > 0x7EF || len < 4) return false;
+  if (d[1] != 0x41 || d[2] != 0x2F) return false;
+  fuelPercent = (int16_t)((d[3] * 100 + 127) / 255);
+  fuelReadMs = millis();
+  return true;
+}
+
+static bool carAwake() {
+  // Ask only while the car is clearly on: engine running, or the car's own
+  // modules are already talking. Never wakes a parked car.
+  return engineRunning || (lastBusFrameMs != 0 && millis() - lastBusFrameMs < 3000);
+}
+
+static void obdSetup() {
+#if OBD_ENABLED
+  twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)PIN_CAN_TX, (gpio_num_t)PIN_CAN_RX, TWAI_MODE_NORMAL);
+  g.tx_queue_len = 2;
+  g.rx_queue_len = 16;
+  twai_timing_config_t t = TWAI_TIMING_CONFIG_500KBITS();   // OBD-II on CAN (ISO 15765-4) runs at 500 kbit/s
+  twai_filter_config_t f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+  if (twai_driver_install(&g, &t, &f) == ESP_OK && twai_start() == ESP_OK) {
+    obdReady = true;
+    Serial.println("OBD-II reader ready");
+  } else {
+    Serial.println("OBD-II reader failed to start (check transceiver wiring)");
+  }
+#endif
+}
+
+static void obdLoop() {
+#if OBD_ENABLED
+  if (!obdReady) return;
+  twai_message_t m;
+  while (twai_receive(&m, 0) == ESP_OK) {
+    if (!m.extd && !m.rtr && handleObdFrame(m.identifier, m.data, m.data_length_code)) {
+      publishVehicle(true);
+    }
+  }
+  twai_status_info_t st;
+  if (twai_get_status_info(&st) == ESP_OK) {
+    if (st.state == TWAI_STATE_BUS_OFF) { twai_initiate_recovery(); return; }  // e.g. asked while nothing answered
+    if (st.state == TWAI_STATE_STOPPED) { twai_start(); return; }              // recovery finished
+  }
+  if (carAwake() && millis() - lastFuelAskMs >= (uint32_t)FUEL_POLL_SECONDS * 1000UL) {
+    lastFuelAskMs = millis();
+    twai_message_t q = {};
+    q.identifier = 0x7DF;                 // OBD-II functional "anyone who knows" request
+    q.data_length_code = 8;
+    const uint8_t req[8] = {0x02, 0x01, 0x2F, 0x55, 0x55, 0x55, 0x55, 0x55};
+    memcpy(q.data, req, 8);
+    twai_transmit(&q, 0);
+  }
+#endif
 }
 
 // ---- Command execution (runs in loop(), never inside a BLE callback) ------
@@ -353,8 +461,14 @@ void setup() {
       STATUS_UUID,
       NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::READ_ENC | NIMBLE_PROPERTY::NOTIFY);
 
+  vehicleChar = svc->createCharacteristic(
+      VEHICLE_UUID,
+      NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::READ_ENC | NIMBLE_PROPERTY::NOTIFY);
+
   svc->start();
   newChallenge();
+  obdSetup();
+  publishVehicle(true);
   updateEngineState();
   publishStatus(true);
 
@@ -377,10 +491,13 @@ void loop() {
     publishStatus(true);
   }
 
+  obdLoop();
+
   static uint32_t lastTick = 0;
   if (millis() - lastTick >= 1000) {
     lastTick = millis();
     updateEngineState();
     publishStatus(false);  // only notifies when something changed (e.g. countdown)
+    publishVehicle(false); // e.g. "updated N min ago" ticking over
   }
 }
