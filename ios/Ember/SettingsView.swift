@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var confirmForget = false
     @State private var showPairingHelp = false
     @State private var showVehicles = false
+    @State private var scanningKey = false
     @AppStorage(AppearanceMode.storageKey) private var appearance = AppearanceMode.system.rawValue
 
     var body: some View {
@@ -23,6 +24,7 @@ struct SettingsView: View {
                         if !car.demoMode || !car.hasKey { keySection }
                         securitySection
                         startSection
+                        smartSection
                         appearanceSection
                         aboutSection
                     }
@@ -49,6 +51,11 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showPairingHelp) { PairingHelpView() }
             .sheet(isPresented: $showVehicles) { VehiclesView().environmentObject(car) }
+            .sheet(isPresented: $scanningKey) {
+                KeyScannerSheet { key in
+                    if car.saveKey(hex: key) { car.notify("Bridge key saved", kind: .success) }
+                }
+            }
         }
     }
 
@@ -175,6 +182,14 @@ struct SettingsView: View {
                     if let keyError {
                         Text(keyError).font(.footnote).foregroundStyle(.red)
                     }
+                    Button { scanningKey = true } label: {
+                        Label("Scan QR code", systemImage: "qrcode.viewfinder")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .glassCard(14, interactive: true)
+                    }
+                    .buttonStyle(.plain)
                     Button {
                         if car.saveKey(hex: keyText) { keyText = "" }
                         else { keyError = "That isn't a 64-character key. Copy the exact EMBER_SECRET_HEX value from config.h." }
@@ -208,10 +223,47 @@ struct SettingsView: View {
                       title: "Rear defrost with every start", subtitle: "Turns on once the engine is running",
                       isOn: $car.defrostOnStart)
             Divider().overlay(Palette.stroke)
+            Divider().overlay(Palette.stroke)
+            ToggleRow(icon: "snowflake", color: Palette.cool,
+                      title: "Defrost when it's cold", subtitle: "Turns on rear defrost after a start if it's near freezing",
+                      isOn: $car.defrostWhenCold)
+            Divider().overlay(Palette.stroke)
             ToggleRow(icon: "iphone.radiowaves.left.and.right", color: Palette.accentSoft,
                       title: "Vibration feedback", subtitle: "Buzz when a command goes through",
                       isOn: $car.hapticsOn)
         }
+    }
+
+    private var smartSection: some View {
+        SettingsSection("Automatic and shortcuts",
+                        footer: "Walk-away lock runs on the bridge: when your phone's Bluetooth connection drops for 30 seconds with the doors unlocked and the engine off, it locks them. Needs the updated bridge firmware.") {
+            ToggleRow(icon: "figure.walk.departure", color: Palette.good,
+                      title: "Walk-away lock", subtitle: "Lock the doors after you walk away",
+                      isOn: $car.walkAwayLock)
+            Divider().overlay(Palette.stroke)
+            NavigationLink { ActivityView() } label: {
+                navRow("clock.arrow.circlepath", Palette.accent, "Activity", "What was sent and when")
+            }
+            .buttonStyle(.plain)
+            Divider().overlay(Palette.stroke)
+            NavigationLink { ShortcutsHelpView() } label: {
+                navRow("mic.fill", .purple, "Siri, Shortcuts and widgets", "Voice, scheduled starts, Lock Screen")
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func navRow(_ icon: String, _ color: Color, _ title: String, _ subtitle: String) -> some View {
+        HStack(spacing: 14) {
+            RowIcon(icon, color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.body.weight(.medium))
+                Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
     }
 
     private var aboutSection: some View {

@@ -19,6 +19,7 @@ struct VehicleView: View {
                     FuelCard(percent: car.vehicle.fuelPercent,
                              ageMinutes: car.vehicle.fuelAgeMinutes,
                              connected: car.link.isUsable)
+                    BatteryCard(volts: car.vehicle.batteryVolts, running: car.status.engineRunning)
                     TireCard(psi: car.vehicle.tiresPSI,
                              ageMinutes: car.vehicle.tiresAgeMinutes,
                              hazards: car.status.hazardsOn,
@@ -58,6 +59,55 @@ func updatedText(_ minutes: Int?) -> String? {
     case 1..<60: return "Updated \(m) min ago"
     case 60..<(48 * 60): return "Updated \(m / 60) hr ago"
     default: return "Updated \(m / (24 * 60)) days ago"
+    }
+}
+
+// MARK: - Battery
+
+struct BatteryCard: View {
+    let volts: Double?
+    let running: Bool
+
+    /// Plain-English health for a 12 V battery (engine off), or charging (engine on).
+    private var state: (String, Color, String) {
+        guard let v = volts else {
+            return ("No reading", .secondary, "Wire the battery sensor to the bridge, or drive with the fuel reader connected.")
+        }
+        if running || v >= 13.2 { return ("Charging", Palette.good, "The engine is running and charging the battery.") }
+        if v >= 12.4 { return ("Good", Palette.good, "Plenty of charge for a remote start.") }
+        if v >= VehicleInfo.lowBatteryVolts { return ("Okay", .orange, "A bit low. A drive will top it up.") }
+        return ("Low", .red, "Remote start may not crank the engine. Drive the car or charge the battery.")
+    }
+
+    var body: some View {
+        let (title, tint, note) = state
+        HStack(spacing: 16) {
+            ZStack {
+                Circle().fill(tint.opacity(0.15))
+                Image(systemName: volts == nil ? "minus.plus.batteryblock" : "minus.plus.batteryblock.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+            .frame(width: 54, height: 54)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Battery").font(.headline)
+                    Spacer()
+                    if let v = volts {
+                        Text(String(format: "%.1f V", v))
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(tint)
+                    }
+                }
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(tint)
+                Text(note).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard(24)
+        .accessibilityElement(children: .combine)
     }
 }
 

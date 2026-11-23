@@ -121,6 +121,7 @@ struct VehicleEditView: View {
     @Environment(\.dismiss) private var dismiss
 
     let original: Vehicle?
+    @State private var scanningKey = false
     @State private var draft: Vehicle
     @State private var keyText = ""
     @State private var error: String?
@@ -341,7 +342,12 @@ struct VehicleEditView: View {
                     .autocorrectionDisabled()
                     .padding(12)
                     .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
+                Button { scanningKey = true } label: {
+                    Label("Scan QR code", systemImage: "qrcode.viewfinder").font(.subheadline.weight(.semibold))
+                }
+                .padding(.top, 2)
             }
+            .sheet(isPresented: $scanningKey) { KeyScannerSheet { keyText = $0 } }
         }
     }
 

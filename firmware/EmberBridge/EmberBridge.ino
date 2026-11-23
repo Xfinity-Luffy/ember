@@ -40,6 +40,8 @@ enum Command : uint8_t {
   CMD_PANIC_ON    = 0x08,
   CMD_PANIC_OFF   = 0x09,
   CMD_ALARM_ACK   = 0x0A,   // clear the "alarm went off" warning
+  CMD_WALKAWAY_ON  = 0x0B,  // lock automatically after the phone walks away
+  CMD_WALKAWAY_OFF = 0x0C,
 };
 
 enum Result : uint8_t {
@@ -87,6 +89,11 @@ static bool     engineRunning   = false;
 static uint32_t runStartedMs    = 0;
 static bool     runStartKnown   = false;  // false if engine was already running when we booted/noticed it
 static bool     lockKnown       = false;
+// Walk-away lock. The app re-sends the setting every time it connects, so it
+// doesn't need to survive a power cut.
+static bool              walkAwayOn       = false;
+static volatile bool     awayPending      = false;
+static volatile uint32_t disconnectedAtMs = 0;
 static bool     locked          = false;
 static uint8_t  lastResult      = RES_NONE;
 static uint8_t  commandSeq      = 0;
@@ -237,17 +244,22 @@ static void publishStatus(bool force) {
 
 // ---- Vehicle info: fuel level over OBD-II (read-only) ---------------------
 //  Vehicle packet (must match CarProtocol.swift):
-//  [ver=1][flags][fuel %][fuel age min LE16][FL FR RL RR tire psi*10 LE16 each][tire age min LE16]
-//  flags: bit0 fuel known, bit1 tires known. "Unknown" values are 0xFFFF.
-static const uint8_t VFLAG_FUEL  = 0x01;
-static const uint8_t VFLAG_TIRES = 0x02;
-static const size_t  VEHICLE_LEN = 15;
+//  [ver=1][flags][fuel %][fuel age min LE16][FL FR RL RR tire psi*10 LE16 each][tire age min LE16][battery mV LE16]
+//  flags: bit0 fuel known, bit1 tires known, bit2 battery known. "Unknown" values are 0xFFFF.
+//  (Older apps read only the first 15 bytes, so the battery field is safely ignored by them.)
+static const uint8_t VFLAG_FUEL    = 0x01;
+static const uint8_t VFLAG_TIRES   = 0x02;
+static const uint8_t VFLAG_BATTERY = 0x04;
+static const size_t  VEHICLE_LEN   = 17;
 
 static int16_t  fuelPercent    = -1;      // -1 = no reading yet
 static uint32_t fuelReadMs     = 0;
 static uint32_t lastBusFrameMs = 0;       // last time we saw ANY traffic from the car
 static uint32_t lastFuelAskMs  = 0;
 static bool     obdReady       = false;
+static int32_t  batteryMv      = -1;      // -1 = unknown
+static uint32_t batteryObdMs   = 0;       // last OBD voltage answer (preferred while fresh)
+static uint32_t lastBatteryAdcMs = 0;
 static uint8_t  lastVehicleSent[VEHICLE_LEN] = {0};
 
 static uint16_t minutesSince(uint32_t ms) {
@@ -268,6 +280,30 @@ static void buildVehicle(uint8_t* p) {
   }
   // Tire pressures (p[5..12], p[13..14]) stay 0xFFFF until the Mazda-specific
   // request for them is known. The app shows "not set up yet" in that case.
+  if (batteryMv > 0) {
+    p[1] |= VFLAG_BATTERY;
+    uint16_t mv = batteryMv > 0xFFFE ? 0xFFFE : (uint16_t)batteryMv;
+    p[15] = mv & 0xFF; p[16] = mv >> 8;
+  }
+}
+
+static void publishVehicle(bool force);
+
+/// Battery voltage from the resistor divider, if wired. Readings under 3 V mean
+/// nothing is connected, so they're ignored.
+static void readBatteryAdc() {
+#if PIN_BATTERY_ADC >= 0
+  if (lastBatteryAdcMs != 0 && millis() - lastBatteryAdcMs < 30000UL) return;
+  lastBatteryAdcMs = millis();
+  if (batteryObdMs != 0 && millis() - batteryObdMs < 120000UL) return;   // fresh OBD value wins
+  uint32_t sum = 0;
+  for (int i = 0; i < 8; i++) sum += analogReadMilliVolts(PIN_BATTERY_ADC);
+  uint32_t pinMv = sum / 8;
+  int32_t mv = (int32_t)(pinMv * (BATTERY_DIVIDER_TOP_K + BATTERY_DIVIDER_BOTTOM_K) / BATTERY_DIVIDER_BOTTOM_K);
+  mv = mv * BATTERY_ADC_CAL_PERCENT / 100;
+  if (mv < 3000) return;
+  if (batteryMv < 0 || abs(mv - batteryMv) >= 50) { batteryMv = mv; publishVehicle(false); }
+#endif
 }
 
 static void publishVehicle(bool force) {
@@ -280,15 +316,27 @@ static void publishVehicle(bool force) {
   if (NimBLEDevice::getServer()->getConnectedCount() > 0) vehicleChar->notify();
 }
 
-// Decode one received CAN frame. Returns true if it was a fuel-level answer.
-// OBD-II answer to "mode 01, PID 2F": ID 0x7E8..0x7EF, data [len][0x41][0x2F][A] -> A*100/255 %
+// Decode one received CAN frame. Returns true if it was an answer we use.
+// OBD-II answers (ID 0x7E8..0x7EF):
+//   mode 01 PID 2F (fuel level):             [len][0x41][0x2F][A]    -> A*100/255 %
+//   mode 01 PID 42 (control module voltage): [len][0x41][0x42][A][B] -> (A*256+B) mV
 static bool handleObdFrame(uint32_t id, const uint8_t* d, uint8_t len) {
   lastBusFrameMs = millis();
   if (id < 0x7E8 || id > 0x7EF || len < 4) return false;
-  if (d[1] != 0x41 || d[2] != 0x2F) return false;
-  fuelPercent = (int16_t)((d[3] * 100 + 127) / 255);
-  fuelReadMs = millis();
-  return true;
+  if (d[1] != 0x41) return false;
+  if (d[2] == 0x2F) {
+    fuelPercent = (int16_t)((d[3] * 100 + 127) / 255);
+    fuelReadMs = millis();
+    return true;
+  }
+  if (d[2] == 0x42 && len >= 5) {
+    int32_t mv = (int32_t)d[3] * 256 + d[4];
+    if (mv < 3000 || mv > 20000) return false;
+    batteryMv = mv;
+    batteryObdMs = millis();
+    return true;
+  }
+  return false;
 }
 
 static bool carAwake() {
@@ -332,7 +380,10 @@ static void obdLoop() {
     twai_message_t q = {};
     q.identifier = 0x7DF;                 // OBD-II functional "anyone who knows" request
     q.data_length_code = 8;
-    const uint8_t req[8] = {0x02, 0x01, 0x2F, 0x55, 0x55, 0x55, 0x55, 0x55};
+    static bool askVoltage = false;      // alternate: fuel, voltage, fuel, ...
+    const uint8_t pid = askVoltage ? 0x42 : 0x2F;
+    askVoltage = !askVoltage;
+    const uint8_t req[8] = {0x02, 0x01, pid, 0x55, 0x55, 0x55, 0x55, 0x55};
     memcpy(q.data, req, 8);
     twai_transmit(&q, 0);
   }
@@ -418,9 +469,34 @@ static uint8_t execute(uint8_t cmd) {
       alarmTriggered = false;
       return RES_OK;
 
+    case CMD_WALKAWAY_ON:
+      if (PIN_LOCK < 0) return RES_UNSUPPORTED;
+      walkAwayOn = true;
+      return RES_OK;
+
+    case CMD_WALKAWAY_OFF:
+      walkAwayOn = false;
+      awayPending = false;
+      return RES_OK;
+
     default:
       return RES_BAD_FORMAT;
   }
+}
+
+// ---- Walk-away lock -----------------------------------------------------------
+// Runs in loop(). Locks only if: the setting is on, the phone has been gone for
+// WALK_AWAY_LOCK_SECONDS, the doors were last unlocked, and the engine is off.
+static void checkWalkAway() {
+  if (!awayPending || !walkAwayOn) return;
+  if (millis() - disconnectedAtMs < (uint32_t)WALK_AWAY_LOCK_SECONDS * 1000UL) return;
+  awayPending = false;
+  updateEngineState();
+  if (!lockKnown || locked || engineRunning || PIN_LOCK < 0) return;
+  pulse(PIN_LOCK);
+  lockKnown = true; locked = true;
+  Serial.println("Walk-away lock: doors locked");
+  publishStatus(true);
 }
 
 // ---- BLE callbacks ---------------------------------------------------------
@@ -458,11 +534,16 @@ class CommandCallbacks : public NimBLECharacteristicCallbacks {
 
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* s, NimBLEConnInfo& connInfo) override {
+    awayPending = false;              // phone is back: cancel any walk-away lock
     newChallenge();
     Serial.printf("Connected: %s\n", connInfo.getAddress().toString().c_str());
   }
   void onDisconnect(NimBLEServer* s, NimBLEConnInfo& connInfo, int reason) override {
     Serial.printf("Disconnected (reason %d)\n", reason);
+    if (NimBLEDevice::getServer()->getConnectedCount() == 0) {
+      disconnectedAtMs = millis();
+      awayPending = true;             // checked in loop(): lock after WALK_AWAY_LOCK_SECONDS
+    }
     newChallenge();
     NimBLEDevice::startAdvertising();
   }
@@ -579,12 +660,14 @@ void loop() {
   }
 
   obdLoop();
+  readBatteryAdc();
 
   static uint32_t lastTick = 0;
   if (millis() - lastTick >= 1000) {
     lastTick = millis();
     updateEngineState();
     updateHazardsAndAlarm();
+    checkWalkAway();
     publishStatus(false);  // only notifies when something changed (e.g. countdown)
     publishVehicle(false); // e.g. "updated N min ago" ticking over
   }

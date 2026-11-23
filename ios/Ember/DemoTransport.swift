@@ -27,7 +27,8 @@ final class DemoTransport: CarTransport {
         onStatus?(status)
         // Sample readings so the Vehicle tab has something to show (one tire a bit low).
         onVehicle?(VehicleInfo(fuelPercent: 62, fuelAgeMinutes: 14,
-                               tiresPSI: [36.0, 35.5, 36.0, 29.5], tiresAgeMinutes: 14))
+                               tiresPSI: [36.0, 35.5, 36.0, 29.5], tiresAgeMinutes: 14,
+                               batteryVolts: 12.6))
         ticker?.cancel()
         ticker = Task { [weak self] in
             while !Task.isCancelled {
@@ -68,6 +69,8 @@ final class DemoTransport: CarTransport {
             status.panicOn = false; status.panicSecondsRemaining = 0; result = .ok
         case .alarmAck:
             status.alarmTriggered = false; result = .ok
+        case .walkAwayOn, .walkAwayOff:
+            result = .ok
         }
         if command == .unlock { status.alarmTriggered = false }
         status.lastResult = result

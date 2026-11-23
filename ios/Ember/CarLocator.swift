@@ -108,6 +108,7 @@ extension CarLocator: @preconcurrency CLLocationManagerDelegate {
               latest.horizontalAccuracy >= 0, latest.horizontalAccuracy < 65 else { return }  // ignore rough fixes
         me = latest
         if nearCar { save(latest) }
+        OutsideTemperature.remember(carSpot?.coordinate ?? latest.coordinate)
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

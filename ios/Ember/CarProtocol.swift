@@ -39,6 +39,26 @@ enum CarCommand: UInt8, CaseIterable {
     case panicOn = 0x08
     case panicOff = 0x09
     case alarmAck = 0x0A  // clear the "alarm went off" warning
+    case walkAwayOn = 0x0B   // bridge locks the doors after the phone walks away
+    case walkAwayOff = 0x0C
+
+    /// Short name for the activity log.
+    var title: String {
+        switch self {
+        case .lock: return "Lock"
+        case .unlock: return "Unlock"
+        case .start: return "Start"
+        case .stop: return "Stop"
+        case .aux1: return "Rear defrost"
+        case .hazardsOn: return "Hazards on"
+        case .hazardsOff: return "Hazards off"
+        case .panicOn: return "Panic alarm"
+        case .panicOff: return "Panic off"
+        case .alarmAck: return "Clear alarm"
+        case .walkAwayOn: return "Walk-away lock on"
+        case .walkAwayOff: return "Walk-away lock off"
+        }
+    }
 
     var verb: String {
         switch self {
@@ -52,6 +72,7 @@ enum CarCommand: UInt8, CaseIterable {
         case .panicOn: return "Panic"
         case .panicOff: return "Stopping panic"
         case .alarmAck: return "Clearing alarm"
+        case .walkAwayOn, .walkAwayOff: return "Updating walk-away lock"
         }
     }
 }
@@ -121,9 +142,16 @@ struct VehicleInfo: Equatable {
     /// Front-left, front-right, rear-left, rear-right, in psi.
     var tiresPSI: [Double]?
     var tiresAgeMinutes: Int?
+    /// 12 V battery, from the bridge (resistor divider, or OBD-II while the car is on).
+    var batteryVolts: Double?
+
+    /// Below this, a remote start may not crank the engine.
+    static let lowBatteryVolts = 11.8
+    var batteryIsLow: Bool { (batteryVolts ?? 99) < Self.lowBatteryVolts }
 
     init() {}
-    init(fuelPercent: Int?, fuelAgeMinutes: Int?, tiresPSI: [Double]?, tiresAgeMinutes: Int?) {
+    init(fuelPercent: Int?, fuelAgeMinutes: Int?, tiresPSI: [Double]?, tiresAgeMinutes: Int?, batteryVolts: Double? = nil) {
+        self.batteryVolts = batteryVolts
         self.fuelPercent = fuelPercent
         self.fuelAgeMinutes = fuelAgeMinutes
         self.tiresPSI = tiresPSI
@@ -144,6 +172,10 @@ struct VehicleInfo: Equatable {
             let raw = [u16(5), u16(7), u16(9), u16(11)]
             if !raw.contains(0xFFFF) { tiresPSI = raw.map { Double($0) / 10 } }
             tiresAgeMinutes = u16(13) == 0xFFFF ? nil : u16(13)
+        }
+        // Newer bridges add [battery mV LE16] with flag bit2.
+        if b.count >= 17, b[1] & 0x04 != 0, u16(15) != 0xFFFF {
+            batteryVolts = Double(u16(15)) / 1000
         }
     }
 }

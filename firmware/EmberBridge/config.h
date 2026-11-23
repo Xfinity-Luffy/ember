@@ -86,6 +86,28 @@
 #define OBD_ENABLED          1
 #define PIN_CAN_TX           21   // to transceiver CTX / TXD
 #define PIN_CAN_RX           22   // to transceiver CRX / RXD
+
+// ---------------------------------------------------------------------------
+//  Walk-away lock (turned on or off from the app's Settings).
+//  When your phone's Bluetooth connection drops while the doors were left
+//  unlocked and the engine is off, the bridge locks them after this many
+//  seconds, unless the phone reconnects first.
+// ---------------------------------------------------------------------------
+#define WALK_AWAY_LOCK_SECONDS 30
+
+// ---------------------------------------------------------------------------
+//  Battery voltage (Home tab warning, low-battery check before remote start).
+//  Read two ways:
+//   * While the car is on: the standard OBD-II "control module voltage" (no extra wiring).
+//   * Any time, even parked: a resistor divider from constant 12 V to an ADC pin.
+//       car 12 V ──[100k]──┬──[22k]── GND
+//                          └──▶ PIN_BATTERY_ADC
+//     Use an input-only ADC1 pin (32–39). Set to -1 if you don't wire it.
+// ---------------------------------------------------------------------------
+#define PIN_BATTERY_ADC      35
+#define BATTERY_DIVIDER_TOP_K    100   // resistor from 12 V, in kilohms
+#define BATTERY_DIVIDER_BOTTOM_K 22    // resistor to ground, in kilohms
+#define BATTERY_ADC_CAL_PERCENT  100   // fine-tune if your multimeter disagrees (e.g. 102)
 #define FUEL_POLL_SECONDS    30   // how often to ask for fuel level while the car is on
 
 // The bridge only asks the car for data while it's awake (engine running, or

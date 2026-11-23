@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct EmberApp: App {
-    @StateObject private var car = CarController()
+    @StateObject private var car = CarController.shared
     @StateObject private var locator = CarLocator()
     @Environment(\.scenePhase) private var scenePhase
 

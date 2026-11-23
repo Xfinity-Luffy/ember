@@ -11,6 +11,9 @@ targets:
     platform: iOS
     sources:
       - path: Ember
+      - path: Shared
+    dependencies:
+      - target: EmberWidgets
     info:
       path: Support/Info.plist
       properties:
@@ -20,6 +23,14 @@ targets:
         NSBluetoothAlwaysUsageDescription: Ember connects to your car's bridge over Bluetooth.
         NSLocationWhenInUseUsageDescription: Ember uses your location to remember where your car is parked and show how far away it is.
         NSFaceIDUsageDescription: Ember uses Face ID to confirm it's you before unlocking or starting the car.
+        NSCameraUsageDescription: Ember uses the camera to scan your bridge key's QR code.
+        NSSupportsLiveActivities: true
+        UIBackgroundModes:
+          - bluetooth-central
+        CFBundleURLTypes:
+          - CFBundleURLName: app.ember.remote
+            CFBundleURLSchemes:
+              - ember
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations:
@@ -38,3 +49,30 @@ targets:
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGN_IDENTITY: ""
     scheme: {}
+
+  # Home Screen / Lock Screen widgets and the "engine running" Live Activity.
+  EmberWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+      - path: Shared
+    info:
+      path: Support/Widgets-Info.plist
+      properties:
+        CFBundleDisplayName: Ember
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.ember.remote.widgets
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""

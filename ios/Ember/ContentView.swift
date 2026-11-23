@@ -53,12 +53,30 @@ struct ContentView: View {
         .animation(.spring(duration: 0.35), value: car.banner)
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(car) }
         .sheet(isPresented: $car.showingVehicles) { VehiclesView().environmentObject(car) }
+        .onOpenURL { url in handleLink(url) }
         .onAppear { locator.useVehicle(spotKey: car.selectedVehicle.spotKey) }
         .onChange(of: car.selectedVehicleID) { _, _ in locator.useVehicle(spotKey: car.selectedVehicle.spotKey) }
         // While the app is connected to the bridge, the phone is at the car:
         // let the locator keep the car's spot up to date.
         .onAppear { locator.nearCar = car.link == .ready && !car.demoMode }
         .onChange(of: car.link) { _, link in locator.nearCar = link == .ready && !car.demoMode }
+    }
+
+    /// ember://lock, unlock, start, location, home (from widgets and the Live Activity).
+    private func handleLink(_ url: URL) {
+        guard url.scheme == EmberLink.scheme else { return }
+        showSettings = false
+        car.showingVehicles = false
+        switch url.host ?? "" {
+        case "lock": car.selectedTab = .remote; car.perform(.lock, source: .widget)
+        case "unlock": car.selectedTab = .remote; car.perform(.unlock, source: .widget)
+        case "start":
+            car.selectedTab = .remote
+            if car.status.engineRunning { car.notify("\(car.carName) is already running", kind: .info) }
+            else { car.requestStart(source: .widget) }
+        case "location": car.selectedTab = .location
+        default: car.selectedTab = .remote
+        }
     }
 }
 
@@ -86,7 +104,7 @@ struct RemoteView: View {
                              active: running,
                              busy: car.pending == .start || car.pending == .stop,
                              enabled: ready,
-                             onSlide: { car.perform(running ? .stop : .start) },
+                             onSlide: { if running { car.perform(.stop) } else { car.requestStart() } },
                              onTap: { car.holdHint() })
                 dock
                 tiles
@@ -95,6 +113,16 @@ struct RemoteView: View {
             .padding(.bottom, 8)
         }
         .animation(.easeInOut(duration: 0.25), value: car.status)
+        .alert("Battery is low", isPresented: Binding(get: { car.lowBatteryStartWarning != nil },
+                                                    set: { if !$0 { car.lowBatteryStartWarning = nil } })) {
+            Button("Start anyway") {
+                car.lowBatteryStartWarning = nil
+                car.perform(.start)
+            }
+            Button("Cancel", role: .cancel) { car.lowBatteryStartWarning = nil }
+        } message: {
+            Text("The battery reads \(String(format: "%.1f", car.lowBatteryStartWarning ?? 0)) V. The engine may not crank, and trying can drain it further.")
+        }
     }
 
     // MARK: Header
@@ -190,6 +218,10 @@ struct RemoteView: View {
                          symbol: "engine.combustion.fill", tint: Palette.accentSoft)
                 }
                 Spacer()
+                if car.vehicle.batteryIsLow, let v = car.vehicle.batteryVolts {
+                    chip(String(format: "Battery %.1f V", v), symbol: "minus.plus.batteryblock.exclamationmark", tint: .orange)
+                    Spacer()
+                }
                 switch car.status.lock {
                 case .locked: chip("Locked", symbol: "lock.fill", tint: .primary)
                 case .unlocked: chip("Unlocked", symbol: "lock.open.fill", tint: Palette.cool)
@@ -230,7 +262,8 @@ struct RemoteView: View {
                 car.perform(.unlock)
             }
             Spacer()
-            DockButton(title: "Defrost", symbol: "windshield.rear.and.heat.waves", tint: Palette.cool,
+            DockButton(title: !running && car.defrostOnStart ? "Next start" : "Defrost",
+                       symbol: "windshield.rear.and.heat.waves", tint: Palette.cool,
                        on: !running && car.defrostOnStart, busy: car.pending == .aux1,
                        enabled: running ? ready : true) {
                 if running {

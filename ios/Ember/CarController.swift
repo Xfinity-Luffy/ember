@@ -36,6 +36,9 @@ enum ConnectionMode: String, CaseIterable, Identifiable, Codable {
 /// The app's single source of truth: link state, car status, and commands.
 @MainActor
 final class CarController: ObservableObject {
+    /// One controller for the whole app, also used by Siri, Shortcuts and widgets.
+    static let shared = CarController()
+
     @Published private(set) var link: LinkState = .searching
     @Published private(set) var status = CarStatus()
     @Published private(set) var vehicle = VehicleInfo()
@@ -51,6 +54,8 @@ final class CarController: ObservableObject {
     /// Shows the vehicle switcher sheet.
     @Published var showingVehicles = false
     @Published var banner: Banner?
+    /// Set when a start was asked for while the battery is low; Home shows a confirmation.
+    @Published var lowBatteryStartWarning: Double?
     @Published var selectedTab: AppTab = .remote
 
     @Published var demoMode: Bool {
@@ -94,6 +99,20 @@ final class CarController: ObservableObject {
     @Published var defrostOnStart: Bool {
         didSet { UserDefaults.standard.set(defrostOnStart, forKey: Keys.defrost) }
     }
+    /// Turn on rear defrost after a remote start when it's near freezing outside.
+    @Published var defrostWhenCold: Bool {
+        didSet { UserDefaults.standard.set(defrostWhenCold, forKey: Keys.coldDefrost) }
+    }
+    /// The bridge locks the doors after your phone walks away (it keeps the timer itself).
+    @Published var walkAwayLock: Bool {
+        didSet {
+            UserDefaults.standard.set(walkAwayLock, forKey: Keys.walkAway)
+            syncedWalkAway = nil
+            syncWalkAwaySetting()
+        }
+    }
+    /// What the connected bridge was last told, so it's only sent when needed.
+    private var syncedWalkAway: Bool?
 
     private var transport: CarTransport?
     private var bannerTask: Task<Void, Never>?
@@ -107,6 +126,8 @@ final class CarController: ObservableObject {
         static let vehicles = "ember.vehicles"
         static let selected = "ember.selectedVehicle"
         static let relay = "ember.relayHost"
+        static let coldDefrost = "ember.defrostWhenCold"
+        static let walkAway = "ember.walkAwayLock"
     }
 
     init() {
@@ -116,28 +137,124 @@ final class CarController: ObservableObject {
         requireFaceID = defaults.bool(forKey: Keys.faceID)
         relayHost = defaults.string(forKey: Keys.relay) ?? ""
         hapticsOn = defaults.object(forKey: Haptics.enabledKey) as? Bool ?? true
+        defrostWhenCold = defaults.bool(forKey: Keys.coldDefrost)
+        walkAwayLock = defaults.bool(forKey: Keys.walkAway)
         loadVehicles()                      // after every stored property is set
         rebuildTransport()
     }
 
     // MARK: Commands
 
-    func perform(_ command: CarCommand) {
+    func perform(_ command: CarCommand, source: ActivityEntry.Source = .app) {
         guard pending == nil else { return }
         pending = command   // block double taps until the command finishes
         Task {
             if requireFaceID, command == .unlock || command == .start {
                 guard await authenticate(for: command) else { pending = nil; return }
             }
-            let ok = await run(command)
-            // Optional follow-up: rear defrost once the engine is actually running.
-            guard ok, command == .start, defrostOnStart else { return }
-            var waited = 0
-            while !status.engineRunning && waited < 40 {   // up to 20 s for the engine to catch
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                waited += 1
-            }
-            if status.engineRunning { _ = await run(.aux1) }
+            let ok = await run(command, source: source)
+            if ok, command == .start { await defrostAfterStartIfWanted() }
+        }
+    }
+
+    /// Start, but ask first if the battery is low (the Home screen shows the question).
+    func requestStart(source: ActivityEntry.Source = .app) {
+        if !status.engineRunning, vehicle.batteryIsLow, let volts = vehicle.batteryVolts {
+            lowBatteryStartWarning = volts
+            return
+        }
+        perform(.start, source: source)
+    }
+
+    /// Rear defrost once the engine is actually running, if it's set to always,
+    /// or if it's cold and "Defrost when it's cold" is on.
+    private func defrostAfterStartIfWanted() async {
+        var coldText: String?
+        if !defrostOnStart {
+            guard defrostWhenCold, let c = await OutsideTemperature.celsius(), c <= 1 else { return }
+            coldText = OutsideTemperature.text(c)
+        }
+        var waited = 0
+        while !status.engineRunning && waited < 40 {   // up to 20 s for the engine to catch
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            waited += 1
+        }
+        guard status.engineRunning else { return }
+        if await run(.aux1, source: .automatic), let coldText {
+            show("It's \(coldText) outside, so rear defrost is on.", kind: .info)
+        }
+    }
+
+    // MARK: Siri, Shortcuts and widgets
+
+    /// Runs a command for Siri / Shortcuts / a widget and returns what to say.
+    /// The system has already asked for Face ID or the passcode where needed.
+    func runForShortcut(_ command: CarCommand, source: ActivityEntry.Source) async -> (ok: Bool, message: String) {
+        if command == .start, !status.engineRunning, vehicle.batteryIsLow, let v = vehicle.batteryVolts {
+            let text = "The battery is low (\(String(format: "%.1f", v)) V), so I didn't start \(carName). Open Ember to start it anyway."
+            ActivityLog.shared.add(ActivityEntry(date: Date(), vehicle: carName, action: "Start",
+                                                 succeeded: false, detail: "Battery low", source: source))
+            return (false, text)
+        }
+        guard await waitUntilConnected(seconds: 20) else {
+            let text = "Couldn't reach \(carName). \(link.label)."
+            ActivityLog.shared.add(ActivityEntry(date: Date(), vehicle: carName, action: command.title,
+                                                 succeeded: false, detail: link.label, source: source))
+            return (false, text)
+        }
+        while pending != nil { try? await Task.sleep(nanoseconds: 200_000_000) }
+        let ok = await run(command, source: source)
+        if ok, command == .start { Task { await defrostAfterStartIfWanted() } }
+        if ok { return (true, "\(successText(for: command)) on \(carName).") }
+        return (false, banner?.text ?? "That didn't work. Open Ember for details.")
+    }
+
+    /// A one-line summary for "What's my car's status?".
+    var statusSummary: String {
+        guard link.isUsable else { return "\(carName): \(link.label)." }
+        var parts: [String] = []
+        switch status.lock {
+        case .locked: parts.append("locked")
+        case .unlocked: parts.append("unlocked")
+        case .unknown: break
+        }
+        if status.engineRunning {
+            parts.append(status.secondsRemaining > 0 ? "running, \(status.secondsRemaining / 60) minutes left" : "running")
+        } else {
+            parts.append("engine off")
+        }
+        if let f = vehicle.fuelPercent { parts.append("\(f)% fuel") }
+        if let v = vehicle.batteryVolts { parts.append(String(format: "battery %.1f V", v)) }
+        return "\(carName) is " + parts.joined(separator: ", ") + "."
+    }
+
+    /// Waits briefly for the car to report in, then summarizes it.
+    func statusForShortcut() async -> String {
+        guard await waitUntilConnected(seconds: 15) else { return "Couldn't reach \(carName). \(link.label)." }
+        if status.lock == .unknown && !status.engineRunning {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)   // first status arrives right after connecting
+        }
+        return statusSummary
+    }
+
+    private func waitUntilConnected(seconds: Double) async -> Bool {
+        transport?.start()
+        let deadline = Date().addingTimeInterval(seconds)
+        while !link.isUsable && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        return link.isUsable
+    }
+
+    /// Tells the bridge whether to lock after the phone walks away. Sent quietly
+    /// each time the app connects, since the bridge doesn't remember it after a power cut.
+    private func syncWalkAwaySetting() {
+        guard link.isUsable, !demoMode, syncedWalkAway != walkAwayLock, pending == nil, let transport else { return }
+        let want = walkAwayLock
+        syncedWalkAway = want
+        Task {
+            do { try await transport.send(want ? .walkAwayOn : .walkAwayOff) }
+            catch { if syncedWalkAway == want { syncedWalkAway = nil } }
         }
     }
 
@@ -208,18 +325,23 @@ final class CarController: ObservableObject {
         return locator.carSpot?.coordinate
     }
 
-    private func run(_ command: CarCommand) async -> Bool {
+    private func run(_ command: CarCommand, source: ActivityEntry.Source = .app) async -> Bool {
         guard let transport else { return false }
         pending = command
         defer { pending = nil }
+        let name = carName
         do {
             try await transport.send(command)
             Haptics.success()
             show(successText(for: command), kind: .success)
+            ActivityLog.shared.add(ActivityEntry(date: Date(), vehicle: name, action: command.title,
+                                                 succeeded: true, detail: nil, source: source))
             return true
         } catch {
             Haptics.error()
             show(error.localizedDescription, kind: .error)
+            ActivityLog.shared.add(ActivityEntry(date: Date(), vehicle: name, action: command.title,
+                                                 succeeded: false, detail: error.localizedDescription, source: source))
             return false
         }
     }
@@ -236,6 +358,8 @@ final class CarController: ObservableObject {
         case .panicOn: return "Panic alarm on"
         case .panicOff: return "Panic alarm stopped"
         case .alarmAck: return "Alarm warning cleared"
+        case .walkAwayOn: return "Walk-away lock is on"
+        case .walkAwayOff: return "Walk-away lock is off"
         }
     }
 
@@ -398,7 +522,11 @@ final class CarController: ObservableObject {
                                                cloud: CloudTransport(host: relayHost, key: key))
             }
         }
-        t.onLinkChange = { [weak self] in self?.link = $0 }
+        t.onLinkChange = { [weak self] new in
+            guard let self else { return }
+            self.link = new
+            if new.isUsable { self.syncWalkAwaySetting() } else { self.syncedWalkAway = nil }
+        }
         t.onStatus = { [weak self] new in
             guard let self else { return }
             if new.alarmTriggered && !self.status.alarmTriggered {
@@ -407,7 +535,14 @@ final class CarController: ObservableObject {
                 self.show("Your car alarm went off. Open the Alarm tab for details.", kind: .error)
             }
             if !new.alarmTriggered { self.alarmTriggeredAt = nil }
+            if self.status.lock == .unlocked, new.lock == .locked, self.pending == nil, !self.demoMode {
+                // Locked by the bridge itself (walk-away lock) rather than by a command.
+                ActivityLog.shared.add(ActivityEntry(date: Date(), vehicle: self.carName, action: "Lock",
+                                                     succeeded: true, detail: "Walk-away lock or another device",
+                                                     source: .automatic))
+            }
             self.status = new
+            RunningActivity.update(name: self.carName, type: self.selectedVehicle.type, status: new)
         }
         t.onError = { [weak self] in self?.show($0, kind: .error) }
         t.onVehicle = { [weak self] in self?.vehicle = $0 }
