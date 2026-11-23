@@ -167,7 +167,7 @@ struct TireCard: View {
                     TireReading(label: "Rear left", value: psi?[2], low: lowPSI)
                 }
                 CarTopView(lowTires: lowFlags)
-                    .frame(width: 92, height: 170)
+                    .frame(width: 92, height: 184)
                 VStack(spacing: 46) {
                     TireReading(label: "Front right", value: psi?[1], low: lowPSI)
                     TireReading(label: "Rear right", value: psi?[3], low: lowPSI)
@@ -219,43 +219,167 @@ struct TireReading: View {
     }
 }
 
-/// Simple top-down car with four tires; low tires glow orange.
+/// Modern top-down car: curved body, panoramic glass roof, light bars,
+/// mirrors and four wheels. Low tires glow orange.
+/// Drawn on a 100 x 200 grid that scales to whatever frame it's given.
 struct CarTopView: View {
     let lowTires: [Bool]   // FL, FR, RL, RR
 
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
-            let tireW = w * 0.16, tireH = h * 0.2
-            ZStack {
-                // Body
-                RoundedRectangle(cornerRadius: w * 0.38, style: .continuous)
-                    .fill(Color.white.opacity(0.10))
-                    .overlay(RoundedRectangle(cornerRadius: w * 0.38, style: .continuous)
-                        .stroke(Color.white.opacity(0.25), lineWidth: 1.5))
-                    .frame(width: w * 0.74, height: h)
-                // Windshield and rear window
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Palette.cool.opacity(0.25))
-                    .frame(width: w * 0.5, height: h * 0.14)
-                    .offset(y: -h * 0.2)
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Palette.cool.opacity(0.18))
-                    .frame(width: w * 0.46, height: h * 0.1)
-                    .offset(y: h * 0.27)
-                // Tires
-                ForEach(0..<4) { i in
-                    let left = i % 2 == 0, front = i < 2
-                    Capsule()
-                        .fill(lowTires[i] ? Color.orange : Color.white.opacity(0.55))
-                        .shadow(color: lowTires[i] ? .orange.opacity(0.8) : .clear, radius: 8)
-                        .frame(width: tireW, height: tireH)
-                        .offset(x: (left ? -1 : 1) * (w * 0.37),
-                                y: (front ? -1 : 1) * (h * 0.29))
-                }
+        ZStack {
+            // Wheels first, so the body covers their inner half.
+            ForEach(0..<4) { i in
+                WheelShape(index: i)
+                    .fill(lowTires[i] ? Color.orange : Color(white: 0.14))
+                    .shadow(color: lowTires[i] ? .orange.opacity(0.9) : .clear, radius: 10)
+                WheelRimShape(index: i)
+                    .fill(lowTires[i] ? Color.white.opacity(0.7) : Color.white.opacity(0.35))
             }
-            .frame(width: w, height: h)
+            // Mirrors
+            MirrorsShape().fill(Color.white.opacity(0.22))
+            // Body: soft metallic sheen
+            CarBodyShape()
+                .fill(LinearGradient(colors: [Color.white.opacity(0.30), Color.white.opacity(0.10), Color.white.opacity(0.16)],
+                                     startPoint: .top, endPoint: .bottom))
+            CarBodyShape().stroke(Color.white.opacity(0.35), lineWidth: 1.2)
+            // Hood crease
+            HoodLinesShape().stroke(Color.white.opacity(0.18), lineWidth: 1)
+            // Panoramic glass roof
+            CanopyShape()
+                .fill(LinearGradient(colors: [Palette.cool.opacity(0.55), Color(red: 0.16, green: 0.12, blue: 0.36).opacity(0.85)],
+                                     startPoint: .top, endPoint: .bottom))
+            CanopyShape().stroke(Color.white.opacity(0.25), lineWidth: 1)
+            RoofSeamsShape().stroke(Color.white.opacity(0.16), lineWidth: 1)
+            // Light bars
+            HeadlightShape()
+                .stroke(Color.white, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                .shadow(color: .white.opacity(0.9), radius: 4)
+            TaillightShape()
+                .stroke(Color(red: 1.0, green: 0.22, blue: 0.22), style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                .shadow(color: .red.opacity(0.9), radius: 4)
         }
+        .aspectRatio(0.5, contentMode: .fit)
         .accessibilityHidden(true)
+    }
+}
+
+/// Maps the 100 x 200 design grid onto a real rectangle.
+private struct Grid {
+    let rect: CGRect
+    func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+        CGPoint(x: rect.minX + x / 100 * rect.width, y: rect.minY + y / 200 * rect.height)
+    }
+    func r(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect {
+        CGRect(origin: p(x, y), size: CGSize(width: w / 100 * rect.width, height: h / 200 * rect.height))
+    }
+}
+
+private struct CarBodyShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        var path = Path()
+        path.move(to: g.p(50, 3))
+        path.addCurve(to: g.p(86, 28), control1: g.p(70, 3), control2: g.p(84, 9))
+        path.addLine(to: g.p(88, 70))
+        path.addCurve(to: g.p(87, 162), control1: g.p(89.5, 100), control2: g.p(89.5, 132))
+        path.addCurve(to: g.p(50, 197), control1: g.p(86, 188), control2: g.p(72, 197))
+        path.addCurve(to: g.p(13, 162), control1: g.p(28, 197), control2: g.p(14, 188))
+        path.addCurve(to: g.p(12, 70), control1: g.p(10.5, 132), control2: g.p(10.5, 100))
+        path.addLine(to: g.p(14, 28))
+        path.addCurve(to: g.p(50, 3), control1: g.p(16, 9), control2: g.p(30, 3))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct CanopyShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        var path = Path()
+        path.move(to: g.p(50, 54))
+        path.addCurve(to: g.p(77, 66), control1: g.p(65, 54), control2: g.p(75, 58))
+        path.addLine(to: g.p(75, 142))
+        path.addCurve(to: g.p(50, 158), control1: g.p(74, 152), control2: g.p(65, 158))
+        path.addCurve(to: g.p(25, 142), control1: g.p(35, 158), control2: g.p(26, 152))
+        path.addLine(to: g.p(23, 66))
+        path.addCurve(to: g.p(50, 54), control1: g.p(25, 58), control2: g.p(35, 54))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Where the windshield meets the roof, and the roof meets the rear glass.
+private struct RoofSeamsShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        var path = Path()
+        path.move(to: g.p(24, 82)); path.addQuadCurve(to: g.p(76, 82), control: g.p(50, 76))
+        path.move(to: g.p(25, 132)); path.addQuadCurve(to: g.p(75, 132), control: g.p(50, 138))
+        return path
+    }
+}
+
+private struct HoodLinesShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        var path = Path()
+        path.move(to: g.p(36, 14)); path.addQuadCurve(to: g.p(32, 50), control: g.p(31, 30))
+        path.move(to: g.p(64, 14)); path.addQuadCurve(to: g.p(68, 50), control: g.p(69, 30))
+        return path
+    }
+}
+
+private struct HeadlightShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        var path = Path()
+        path.move(to: g.p(20, 16))
+        path.addQuadCurve(to: g.p(80, 16), control: g.p(50, 5))
+        return path
+    }
+}
+
+private struct TaillightShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        var path = Path()
+        path.move(to: g.p(18, 186))
+        path.addQuadCurve(to: g.p(82, 186), control: g.p(50, 196))
+        return path
+    }
+}
+
+private struct MirrorsShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        var path = Path()
+        path.addRoundedRect(in: g.r(3, 58, 11, 7), cornerSize: CGSize(width: 3, height: 3))
+        path.addRoundedRect(in: g.r(86, 58, 11, 7), cornerSize: CGSize(width: 3, height: 3))
+        return path
+    }
+}
+
+/// index: 0 FL, 1 FR, 2 RL, 3 RR
+private func wheelRect(_ index: Int) -> (x: CGFloat, y: CGFloat) {
+    let left = index % 2 == 0, front = index < 2
+    return (left ? 4 : 82, front ? 32 : 126)
+}
+
+private struct WheelShape: Shape {
+    let index: Int
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        let w = wheelRect(index)
+        return Path(roundedRect: g.r(w.x, w.y, 14, 34), cornerRadius: 0.05 * rect.width, style: .continuous)
+    }
+}
+
+private struct WheelRimShape: Shape {
+    let index: Int
+    func path(in rect: CGRect) -> Path {
+        let g = Grid(rect: rect)
+        let w = wheelRect(index)
+        let outerX = index % 2 == 0 ? w.x + 2 : w.x + 9   // rim stripe on the outside edge
+        return Path(roundedRect: g.r(outerX, w.y + 6, 3, 22), cornerRadius: 0.015 * rect.width, style: .continuous)
     }
 }
