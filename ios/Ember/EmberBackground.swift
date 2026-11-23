@@ -5,6 +5,8 @@ import SwiftUI
 /// Gives the Liquid Glass cards something colorful to refract.
 struct EmberBackground: View {
     var running: Bool
+    @Environment(\.colorScheme) private var scheme
+    private var light: Bool { scheme == .light }
 
     var body: some View {
         ZStack {
@@ -16,7 +18,7 @@ struct EmberBackground: View {
                 fallback
             }
             // Soft vignette keeps text readable at the edges.
-            RadialGradient(colors: [.clear, .black.opacity(0.55)],
+            RadialGradient(colors: [.clear, .black.opacity(light ? 0.06 : 0.55)],
                            center: .center, startRadius: 180, endRadius: 650)
         }
         .ignoresSafeArea()
@@ -43,6 +45,19 @@ struct EmberBackground: View {
     }
 
     private var colors: [Color] {
+        if light {
+            let mist = Color(red: 0.95, green: 0.95, blue: 0.97)
+            let lilac = Color(red: 0.90, green: 0.89, blue: 0.97)
+            let blush = Color(red: 0.98, green: 0.90, blue: 0.90)
+            let sky = Color(red: 0.88, green: 0.93, blue: 0.98)
+            let peach = running ? Color(red: 1.00, green: 0.76, blue: 0.62) : Color(red: 0.99, green: 0.86, blue: 0.78)
+            let sand = running ? Color(red: 0.99, green: 0.84, blue: 0.76) : Color(red: 0.97, green: 0.92, blue: 0.89)
+            return [
+                mist, lilac, mist,
+                sky,  blush, lilac,
+                sand, peach, sand,
+            ]
+        }
         let night = Color(red: 0.04, green: 0.04, blue: 0.10)
         let indigo = Color(red: 0.10, green: 0.08, blue: 0.24)
         let plum = Color(red: 0.24, green: 0.08, blue: 0.22)
@@ -60,8 +75,9 @@ struct EmberBackground: View {
 
     private var fallback: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.04, green: 0.04, blue: 0.10),
-                                    Color(red: 0.10, green: 0.08, blue: 0.24)],
+            LinearGradient(colors: light
+                           ? [Color(red: 0.95, green: 0.95, blue: 0.97), Color(red: 0.90, green: 0.89, blue: 0.97)]
+                           : [Color(red: 0.04, green: 0.04, blue: 0.10), Color(red: 0.10, green: 0.08, blue: 0.24)],
                            startPoint: .top, endPoint: .bottom)
             Circle()
                 .fill(running ? Color(red: 1.0, green: 0.40, blue: 0.16) : Color(red: 0.72, green: 0.26, blue: 0.12))

@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import CryptoKit
 import LocalAuthentication
+import CoreLocation
 
 struct Banner: Identifiable, Equatable {
     enum Kind { case success, error, info }
@@ -184,9 +185,27 @@ final class CarController: ObservableObject {
             return
         }
         show(status.engineRunning
-             ? "Press and hold for one second to stop the engine."
-             : "Press and hold for one second to start. This prevents accidental starts.",
+             ? "Slide the button all the way across to stop the engine."
+             : "Slide the button all the way across to start. This prevents accidental starts.",
              kind: .info)
+    }
+
+    /// Shows a short message above the tab bar.
+    func notify(_ text: String, kind: Banner.Kind) { show(text, kind: kind) }
+
+    /// Where to show the selected car on a map: a pretend spot in demo mode, the car's
+    /// own cellular GPS when that's newer, otherwise the spot this phone saved.
+    func mapSpot(locator: CarLocator) -> CLLocationCoordinate2D? {
+        if demoMode {
+            let base = locator.me?.coordinate ?? CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194)
+            return CLLocationCoordinate2D(latitude: base.latitude + 0.0011, longitude: base.longitude + 0.0009)
+        }
+        if let c = cellular, let lat = c.latitude, let lon = c.longitude {
+            let time = c.fixTime ?? c.checkIn
+            if let saved = locator.carSpot, link == .ready || saved.time > time { return saved.coordinate }
+            return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        }
+        return locator.carSpot?.coordinate
     }
 
     private func run(_ command: CarCommand) async -> Bool {

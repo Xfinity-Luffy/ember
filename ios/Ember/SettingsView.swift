@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var confirmForget = false
     @State private var showPairingHelp = false
     @State private var showVehicles = false
+    @AppStorage(AppearanceMode.storageKey) private var appearance = AppearanceMode.system.rawValue
 
     var body: some View {
         NavigationStack {
@@ -22,6 +23,7 @@ struct SettingsView: View {
                         if !car.demoMode || !car.hasKey { keySection }
                         securitySection
                         startSection
+                        appearanceSection
                         aboutSection
                     }
                     .padding(.horizontal, 20)
@@ -68,6 +70,19 @@ struct SettingsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    private var appearanceSection: some View {
+        SettingsSection("Appearance", footer: (AppearanceMode(rawValue: appearance) ?? .system).explanation) {
+            HStack(spacing: 14) {
+                RowIcon("circle.lefthalf.filled", .purple)
+                Text("Theme").font(.body.weight(.medium))
+            }
+            Picker("Appearance", selection: $appearance) {
+                ForEach(AppearanceMode.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            .pickerStyle(.segmented)
         }
     }
 

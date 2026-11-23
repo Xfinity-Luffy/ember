@@ -55,11 +55,13 @@ struct HazardsView: View {
                     }
 
                     // The car, with its corner lights blinking while the hazards are on.
-                    HStack(spacing: 18) {
-                        CarTopView(lowTires: [false, false, false, false],
-                                   hazards: on, panic: car.status.panicOn, alarmGlow: false,
-                                   bodyColor: car.selectedVehicle.color.swatch)
-                            .frame(width: 64, height: 128)
+                    VStack(alignment: .leading, spacing: 14) {
+                        VehicleSilhouette(type: car.selectedVehicle.type,
+                                          color: car.selectedVehicle.color.swatch,
+                                          running: car.status.engineRunning,
+                                          hazards: on, panic: car.status.panicOn)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 110)
                         VStack(alignment: .leading, spacing: 6) {
                             Text(on ? "Corner lights flashing" : "Corner lights off")
                                 .font(.headline)
@@ -68,7 +70,7 @@ struct HazardsView: View {
                                     : "Turning the hazards on blinks all four turn signals.")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
-                        Spacer(minLength: 0)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(18)
                     .glassCard(24, tint: on ? Color.orange.opacity(0.18) : nil)

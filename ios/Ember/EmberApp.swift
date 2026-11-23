@@ -8,11 +8,12 @@ struct EmberApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(car)
-                .environmentObject(locator)
-                .preferredColorScheme(.dark)
-                .tint(Palette.accent)
+            AppearanceRoot {
+                ContentView()
+                    .environmentObject(car)
+                    .environmentObject(locator)
+                    .tint(Palette.accent)
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

@@ -69,10 +69,8 @@ private struct VehicleRow: View {
         HStack(spacing: 14) {
             Button(action: onSelect) {
                 HStack(spacing: 14) {
-                    CarTopView(lowTires: [false, false, false, false], bodyColor: vehicle.color.swatch)
-                        .frame(width: 30, height: 60)
-                        .rotationEffect(.degrees(90))
-                        .frame(width: 60, height: 44)
+                    VehicleSilhouette(type: vehicle.type, color: vehicle.color.swatch)
+                        .frame(width: 72, height: 40)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(vehicle.name).font(.headline).lineLimit(1)
                         Text(subtitle).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
@@ -144,11 +142,10 @@ struct VehicleEditView: View {
                 EmberBackground(running: false)
                 ScrollView {
                     VStack(spacing: 22) {
-                        CarTopView(lowTires: [false, false, false, false], bodyColor: draft.color.swatch)
-                            .frame(width: 70, height: 140)
-                            .rotationEffect(.degrees(90))
-                            .frame(height: 90)
+                        VehicleSilhouette(type: draft.type, color: draft.color.swatch, running: true)
+                            .frame(height: 96)
                             .padding(.top, 4)
+                            .animation(.easeInOut(duration: 0.2), value: draft.type)
 
                         SettingsSection("Name") {
                             TextField("e.g. Mazda3, Work truck", text: $draft.name)
@@ -157,6 +154,12 @@ struct VehicleEditView: View {
                         }
 
                         identificationSection
+                        SettingsSection("Type", footer: "Sets the vehicle's silhouette in the app.") {
+                            Picker("Type", selection: $draft.type) {
+                                ForEach(VehicleType.allCases) { Text($0.shortTitle).tag($0) }
+                            }
+                            .pickerStyle(.segmented)
+                        }
                         colorSection
 
                         SettingsSection("Connection", footer: draft.connection.explanation) {
@@ -290,6 +293,7 @@ struct VehicleEditView: View {
                 let d = try await VIN.lookUp(vinClean)
                 draft.year = d.year; draft.make = d.make.capitalized; draft.model = d.model
                 draft.trim = d.trim; draft.body = d.body
+                draft.type = VehicleType.guess(body: d.body, model: d.model)
                 if draft.name.isEmpty { draft.name = d.model.isEmpty ? d.make.capitalized : d.model }
                 lookupNote = "Found: \(draft.description)\(d.trim.isEmpty ? "" : " \(d.trim)")"
             } catch {

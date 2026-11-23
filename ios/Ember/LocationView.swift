@@ -74,7 +74,7 @@ struct LocationView: View {
             if let spot {
                 Annotation(car.carName, coordinate: spot, anchor: .bottom) {
                     CarPin(live: live, alert: car.status.alarmTriggered || car.status.panicOn,
-                           hazards: car.status.hazardsOn)
+                           hazards: car.status.hazardsOn, type: car.selectedVehicle.type)
                 }
             }
             UserAnnotation()
@@ -99,6 +99,19 @@ struct LocationView: View {
             .padding(.vertical, 6)
             .glass(Capsule())
             .padding(12)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if spot != nil {
+                Button { showCar() } label: {
+                    Image(systemName: "scope")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .glass(Circle(), interactive: true)
+                }
+                .buttonStyle(.plain)
+                .padding(12)
+                .accessibilityLabel("Show car")
+            }
         }
     }
 
@@ -127,43 +140,26 @@ struct LocationView: View {
                 .font(.subheadline.weight(.semibold))
             }
 
-            HStack(spacing: 12) {
-                Button { openDirections() } label: {
-                    Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .glassCard(16, tint: Palette.accent.opacity(0.4), interactive: true)
-                }
-                .buttonStyle(.plain)
-                .disabled(spot == nil)
-                .opacity(spot == nil ? 0.45 : 1)
-
-                Button { showCar() } label: {
-                    Label("Show car", systemImage: "scope")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .glassCard(16, interactive: true)
-                }
-                .buttonStyle(.plain)
-                .disabled(spot == nil)
-                .opacity(spot == nil ? 0.45 : 1)
-            }
-
-            if !car.demoMode && !live {
-                Button {
+            HStack(spacing: 10) {
+                actionButton("Directions", "arrow.triangle.turn.up.right.diamond.fill", tint: Palette.accent) { openDirections() }
+                    .disabled(spot == nil)
+                    .opacity(spot == nil ? 0.45 : 1)
+                actionButton("Park here", "mappin.circle.fill") {
                     Haptics.tap()
                     locator.saveHere()
-                } label: {
-                    Label("My car is here", systemImage: "mappin.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .glassCard(16, interactive: true)
+                    car.notify("Saved this spot for \(car.carName)", kind: .success)
                 }
-                .buttonStyle(.plain)
-                .disabled(locator.me == nil)
+                .disabled(locator.me == nil || car.demoMode)
+                .opacity(locator.me == nil || car.demoMode ? 0.45 : 1)
+                if let spot, let url = shareURL(spot) {
+                    ShareLink(item: url, subject: Text(car.carName),
+                              message: Text("Here's where \(car.carName) is parked")) {
+                        actionLabel("Share", "square.and.arrow.up")
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    actionLabel("Share", "square.and.arrow.up").opacity(0.45)
+                }
             }
 
             Text(footnote)
@@ -219,6 +215,29 @@ struct LocationView: View {
         return "Updates live while the app is connected to your car. After you walk away, it keeps the last spot. It stays on this iPhone."
     }
 
+    private func actionLabel(_ title: String, _ symbol: String, tint: Color? = nil) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: symbol).font(.system(size: 18, weight: .semibold))
+            Text(title).font(.caption.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 11)
+        .glassCard(16, tint: tint?.opacity(0.4), interactive: true)
+    }
+
+    private func actionButton(_ title: String, _ symbol: String, tint: Color? = nil,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) { actionLabel(title, symbol, tint: tint) }
+            .buttonStyle(.plain)
+    }
+
+    private func shareURL(_ spot: CLLocationCoordinate2D) -> URL? {
+        var parts = URLComponents(string: "https://maps.apple.com/")
+        parts?.queryItems = [URLQueryItem(name: "ll", value: String(format: "%.6f,%.6f", spot.latitude, spot.longitude)),
+                             URLQueryItem(name: "q", value: car.carName)]
+        return parts?.url
+    }
+
     private func showCar() {
         guard let spot else { return }
         withAnimation {
@@ -264,6 +283,7 @@ struct CarPin: View {
     let live: Bool
     let alert: Bool
     let hazards: Bool
+    var type: VehicleType = .car
 
     @State private var pulse = false
 
@@ -276,9 +296,8 @@ struct CarPin: View {
                     .stroke(color.opacity(pulse ? 0 : 0.7), lineWidth: 3)
                     .frame(width: pulse ? 70 : 38, height: pulse ? 70 : 38)
             }
-            Image(systemName: "car.fill")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(.white)
+            VehicleSilhouette(type: type, color: .white)
+                .padding(.horizontal, 5)
                 .frame(width: 40, height: 40)
                 .background(color.gradient, in: Circle())
                 .overlay(Circle().stroke(.white, lineWidth: 2.5))

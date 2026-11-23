@@ -14,6 +14,7 @@ struct Vehicle: Codable, Identifiable, Equatable {
     var plate = ""
     var color: VehicleColor = .silver
     var connection: ConnectionMode = .bluetooth
+    var type: VehicleType = .car
 
     static let maxCount = 4
 
@@ -26,6 +27,58 @@ struct Vehicle: Codable, Identifiable, Equatable {
     var keychainAccount: String { id.uuidString }
     var peripheralKey: String { "ember.bridgePeripheralID.\(id.uuidString)" }
     var spotKey: String { "ember.carSpot.\(id.uuidString)" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, vin, year, make, model, trim, body, plate, color, connection, type
+    }
+}
+
+extension Vehicle {
+    /// Reads saved vehicles, including ones saved before a field existed.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "My Car"
+        vin = try c.decodeIfPresent(String.self, forKey: .vin) ?? ""
+        year = try c.decodeIfPresent(String.self, forKey: .year) ?? ""
+        make = try c.decodeIfPresent(String.self, forKey: .make) ?? ""
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        trim = try c.decodeIfPresent(String.self, forKey: .trim) ?? ""
+        body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
+        plate = try c.decodeIfPresent(String.self, forKey: .plate) ?? ""
+        color = (try? c.decodeIfPresent(VehicleColor.self, forKey: .color)) ?? .silver
+        connection = (try? c.decodeIfPresent(ConnectionMode.self, forKey: .connection)) ?? .bluetooth
+        type = (try? c.decodeIfPresent(VehicleType.self, forKey: .type))
+            ?? VehicleType.guess(body: body, model: model)
+    }
+}
+
+/// The shape used for the vehicle's silhouette.
+enum VehicleType: String, Codable, CaseIterable, Identifiable {
+    case car, hatchback, suv, truck
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .car: return "Car"
+        case .hatchback: return "Hatchback"
+        case .suv: return "SUV"
+        case .truck: return "Truck"
+        }
+    }
+    /// Short label for the segmented picker.
+    var shortTitle: String { self == .hatchback ? "Hatch" : title }
+
+    /// Best guess from NHTSA's body class (e.g. "Hatchback/Liftback/Notchback",
+    /// "Sport Utility Vehicle (SUV)/Multi-Purpose Vehicle (MPV)", "Pickup").
+    static func guess(body: String, model: String = "") -> VehicleType {
+        let b = (body + " " + model).lowercased()
+        if b.contains("pickup") || b.contains("truck") { return .truck }
+        if b.contains("sport utility") || b.contains("suv") || b.contains("crossover")
+            || b.contains("multi-purpose") || b.contains("van") || b.contains("wagon") { return .suv }
+        if b.contains("hatchback") || b.contains("liftback") { return .hatchback }
+        return .car
+    }
 }
 
 enum VehicleColor: String, Codable, CaseIterable, Identifiable {

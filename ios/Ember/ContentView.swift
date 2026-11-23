@@ -1,4 +1,6 @@
 import SwiftUI
+import MapKit
+import CoreLocation
 
 // MARK: - Palette
 
@@ -11,7 +13,7 @@ enum Palette {
     static let stroke = Color.white.opacity(0.10)
 }
 
-// MARK: - App shell: two tabs, one banner, one settings sheet
+// MARK: - App shell: five tabs, one banner, one settings sheet
 
 struct ContentView: View {
     @EnvironmentObject private var car: CarController
@@ -22,21 +24,21 @@ struct ContentView: View {
         ZStack(alignment: .bottom) {
             TabView(selection: $car.selectedTab) {
                 RemoteView(showSettings: $showSettings)
-                    .tabItem { Label("Remote", systemImage: "car.fill") }
+                    .tabItem { Label("Home", systemImage: "car.side.fill") }
                     .tag(AppTab.remote)
                 VehicleView(showSettings: $showSettings)
                     .tabItem { Label("Vehicle", systemImage: "gauge.with.dots.needle.67percent") }
                     .tag(AppTab.vehicle)
                 HazardsView(showSettings: $showSettings)
-                    .tabItem { Label("Hazards", systemImage: "exclamationmark.triangle.fill") }
+                    .tabItem { Label("Hazards", systemImage: "exclamationmark.triangle") }
                     .tag(AppTab.hazards)
                     .badge(car.status.hazardsOn ? Text("On") : nil)
                 AlarmView(showSettings: $showSettings)
-                    .tabItem { Label("Alarm", systemImage: "light.beacon.max.fill") }
+                    .tabItem { Label("Alarm", systemImage: "shield") }
                     .tag(AppTab.alarm)
                     .badge(car.status.alarmTriggered || car.status.panicOn ? Text("!") : nil)
                 LocationView(showSettings: $showSettings)
-                    .tabItem { Label("Location", systemImage: "location.fill") }
+                    .tabItem { Label("Location", systemImage: "mappin.and.ellipse") }
                     .tag(AppTab.location)
             }
             .tint(Palette.accent)
@@ -44,7 +46,7 @@ struct ContentView: View {
             if let banner = car.banner {
                 BannerView(banner: banner)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 64)      // sits just above the tab bar
+                    .padding(.bottom, 70)      // sits just above the tab bar
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -60,35 +62,37 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Remote tab
+// MARK: - Home tab (fits on one screen, above the tab bar)
 
 struct RemoteView: View {
     @EnvironmentObject private var car: CarController
+    @EnvironmentObject private var locator: CarLocator
     @Binding var showSettings: Bool
 
     private var ready: Bool { car.link.isUsable && car.pending == nil }
+    private var running: Bool { car.status.engineRunning }
 
     var body: some View {
         ZStack {
-            EmberBackground(running: car.status.engineRunning)
+            EmberBackground(running: running || car.status.alarmTriggered)
 
-            ScrollView {
-                VStack(spacing: 20) {
-                    header
-                    if !car.demoMode && !car.hasKey { keyMissingCard }
-                    ActiveAlertsStrip()
-                    StatusCard(link: car.link, status: car.status, demo: car.demoMode, checkIn: car.cellular?.checkIn)
-                    StartButton(status: car.status,
-                                busy: car.pending == .start || car.pending == .stop,
-                                enabled: ready,
-                                onHold: { car.perform(car.status.engineRunning ? .stop : .start) },
-                                onShortTap: { car.holdHint() })
-                    defrostRow
-                    doorsCard
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 110)
+            VStack(spacing: 12) {
+                header
+                if !car.demoMode && !car.hasKey { keyMissingCard }
+                hero
+                SlideControl(title: slideTitle,
+                             symbol: "power",
+                             tint: Palette.accent,
+                             active: running,
+                             busy: car.pending == .start || car.pending == .stop,
+                             enabled: ready,
+                             onSlide: { car.perform(running ? .stop : .start) },
+                             onTap: { car.holdHint() })
+                dock
+                tiles
             }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 8)
         }
         .animation(.easeInOut(duration: 0.25), value: car.status)
     }
@@ -97,10 +101,10 @@ struct RemoteView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
-            // Long names wrap onto a second line (then shrink a little, then end in "…")
-            // instead of pushing the settings button out of place.
+            // Long names wrap onto a second line (then shrink a little) instead of
+            // pushing the settings button out of place.
             Button { car.showingVehicles = true } label: {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(car.carName)
                             .font(.system(size: 30, weight: .bold, design: .rounded))
@@ -109,113 +113,424 @@ struct RemoteView: View {
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                         Image(systemName: "chevron.down")
-                            .font(.system(size: 15, weight: .bold))
+                            .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(.secondary)
                     }
-                    if car.vehicles.count > 1 || !car.selectedVehicle.description.isEmpty {
-                        Text(car.vehicles.count > 1
-                             ? "\(car.selectedVehicle.description.isEmpty ? "Vehicle" : car.selectedVehicle.description) · \(car.vehicles.count) vehicles"
-                             : car.selectedVehicle.description)
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(car.link.isUsable ? Palette.good : Color.orange)
+                            .frame(width: 7, height: 7)
+                            .shadow(color: car.link.isUsable ? Palette.good : .clear, radius: 4)
+                        Text(statusLine)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(car.carName). Switch vehicle")
+            .accessibilityLabel("\(car.carName). \(statusLine). Switch vehicle")
             SettingsButton { showSettings = true }
         }
-        .padding(.top, 12)
+        .padding(.top, 8)
+    }
+
+    private var statusLine: String {
+        guard car.link.isUsable else { return car.link.label }
+        var parts: [String] = []
+        switch car.status.lock {
+        case .locked: parts.append("Locked")
+        case .unlocked: parts.append("Unlocked")
+        case .unknown: break
+        }
+        parts.append(running ? "Running" : "Parked")
+        parts.append(car.demoMode ? "Demo" : car.connectionMode.title)
+        if car.vehicles.count > 1 { parts.append("\(car.vehicles.count) vehicles") }
+        return parts.joined(separator: " · ")
     }
 
     private var keyMissingCard: some View {
         Button { showSettings = true } label: {
             HStack(spacing: 12) {
                 Image(systemName: "key.fill").foregroundStyle(Palette.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("One more step").font(.subheadline.weight(.semibold))
-                    Text("Add your bridge key so the app can control the car.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                Text("Add your bridge key so the app can control the car.")
+                    .font(.footnote.weight(.medium))
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
             }
-            .padding(14)
-            .glassCard(18, tint: Palette.accent.opacity(0.3))
+            .padding(12)
+            .glassCard(16, tint: Palette.accent.opacity(0.3))
         }
         .buttonStyle(.plain)
     }
 
-    // MARK: Defrost
+    // MARK: Hero: the vehicle with its lights
 
-    /// Before starting: a switch to add defrost to the next start.
-    /// While running: a button that turns defrost on now.
-    @ViewBuilder
-    private var defrostRow: some View {
-        if car.status.engineRunning {
-            Button { Haptics.tap(); car.perform(.aux1) } label: {
-                HStack(spacing: 10) {
-                    if car.pending == .aux1 { ProgressView().tint(.white) }
-                    else { Image(systemName: "windshield.rear.and.heat.waves") }
-                    Text("Turn on rear defrost")
-                }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Palette.cool)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .glassCard(18, tint: Palette.cool.opacity(0.35), interactive: true)
-            }
-            .buttonStyle(.plain)
-            .disabled(!ready)
-        } else {
-            Toggle(isOn: $car.defrostOnStart) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Also turn on rear defrost").font(.subheadline.weight(.semibold))
-                        Text("Heat and A/C use the settings you left when you parked.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "windshield.rear.and.heat.waves").foregroundStyle(Palette.cool)
-                }
-            }
-            .tint(Palette.cool)
-            .padding(14)
-            .glassCard(18)
-        }
-    }
+    private var hero: some View {
+        ZStack(alignment: .top) {
+            VehicleSilhouette(type: car.selectedVehicle.type,
+                              color: car.selectedVehicle.color.swatch,
+                              running: running,
+                              hazards: car.status.hazardsOn,
+                              panic: car.status.panicOn,
+                              alarm: car.status.alarmTriggered)
+                .padding(.horizontal, 8)
+                .padding(.top, 34)
+                .frame(maxWidth: .infinity, maxHeight: 190)
+                .frame(maxHeight: .infinity)
 
-    // MARK: Doors
-
-    private var doorsCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Doors").font(.headline)
+                if running {
+                    chip(running && car.status.secondsRemaining > 0
+                         ? "Running \(clock(car.status.secondsRemaining))" : "Running",
+                         symbol: "engine.combustion.fill", tint: Palette.accentSoft)
+                }
                 Spacer()
-                Text(doorText).font(.subheadline).foregroundStyle(.secondary)
-            }
-            HStack(spacing: 12) {
-                DoorButton(title: "Lock", symbol: "lock.fill", tint: Palette.accent,
-                           current: car.status.lock == .locked,
-                           busy: car.pending == .lock, enabled: ready) { car.perform(.lock) }
-                DoorButton(title: "Unlock", symbol: "lock.open.fill", tint: Palette.cool,
-                           current: car.status.lock == .unlocked,
-                           busy: car.pending == .unlock, enabled: ready) { car.perform(.unlock) }
+                switch car.status.lock {
+                case .locked: chip("Locked", symbol: "lock.fill", tint: .primary)
+                case .unlocked: chip("Unlocked", symbol: "lock.open.fill", tint: Palette.cool)
+                case .unknown: EmptyView()
+                }
             }
         }
-        .padding(16)
-        .glassCard(24)
+        .frame(minHeight: 90, maxHeight: .infinity)
     }
 
-    private var doorText: String {
-        switch car.status.lock {
-        case .locked: return car.demoMode ? "Locked" : "Last sent: locked"
-        case .unlocked: return car.demoMode ? "Unlocked" : "Last sent: unlocked"
-        case .unknown: return "Not sent yet"
+    private func chip(_ text: String, symbol: String, tint: Color) -> some View {
+        Label(text, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .monospacedDigit()
+            .foregroundStyle(tint)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .glass(Capsule())
+    }
+
+    private var slideTitle: String {
+        if car.pending == .start { return "Starting…" }
+        if car.pending == .stop { return "Stopping…" }
+        return running ? "Slide to stop" : "Slide to start"
+    }
+
+    // MARK: Control dock
+
+    private var dock: some View {
+        HStack {
+            DockButton(title: "Lock", symbol: "lock.fill", tint: Palette.accent,
+                       on: car.status.lock == .locked, busy: car.pending == .lock, enabled: ready) {
+                car.perform(.lock)
+            }
+            Spacer()
+            DockButton(title: "Unlock", symbol: "lock.open.fill", tint: Palette.cool,
+                       on: car.status.lock == .unlocked, busy: car.pending == .unlock, enabled: ready) {
+                car.perform(.unlock)
+            }
+            Spacer()
+            DockButton(title: "Defrost", symbol: "windshield.rear.and.heat.waves", tint: Palette.cool,
+                       on: !running && car.defrostOnStart, busy: car.pending == .aux1,
+                       enabled: running ? ready : true) {
+                if running {
+                    car.perform(.aux1)
+                } else {
+                    car.defrostOnStart.toggle()
+                    car.notify(car.defrostOnStart ? "Rear defrost will turn on with the next start"
+                                                  : "Rear defrost won't turn on with the next start",
+                               kind: .info)
+                }
+            }
+            Spacer()
+            DockButton(title: "Hazards", symbol: "exclamationmark.triangle.fill", tint: .orange,
+                       on: car.status.hazardsOn,
+                       busy: car.pending == .hazardsOn || car.pending == .hazardsOff, enabled: ready) {
+                car.perform(car.status.hazardsOn ? .hazardsOff : .hazardsOn)
+            }
         }
+        .padding(.horizontal, 4)
+    }
+
+    // MARK: Tiles
+
+    private var tiles: some View {
+        Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+            GridRow {
+                TileButton { car.selectedTab = .vehicle } content: { FuelTile(percent: car.vehicle.fuelPercent, age: car.vehicle.fuelAgeMinutes) }
+                TileButton { car.selectedTab = .vehicle } content: { TireTile(psi: car.vehicle.tiresPSI) }
+            }
+            GridRow {
+                TileButton { car.selectedTab = .location } content: { MapTile() }
+                TileButton { car.selectedTab = .alarm } content: { AlarmTile(status: car.status) }
+            }
+        }
+    }
+}
+
+// MARK: - Slide to start / stop
+
+struct SlideControl: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    let active: Bool
+    let busy: Bool
+    let enabled: Bool
+    let onSlide: () -> Void
+    let onTap: () -> Void
+
+    @State private var offset: CGFloat = 0
+    private let knob: CGFloat = 50
+
+    var body: some View {
+        GeometryReader { geo in
+            let maxX = max(1, geo.size.width - knob - 8)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.clear)
+                    .glass(Capsule(), tint: active ? tint.opacity(0.35) : nil)
+                Text(title)
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.leading, 44)
+                    .opacity(1 - Double(offset / maxX))
+                Circle()
+                    .fill(active ? Color.white : tint)
+                    .frame(width: knob, height: knob)
+                    .overlay {
+                        if busy {
+                            ProgressView().tint(active ? tint : .white)
+                        } else {
+                            Image(systemName: symbol)
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundStyle(active ? tint : .white)
+                        }
+                    }
+                    .shadow(color: (active ? Color.white : tint).opacity(0.55), radius: 12)
+                    .offset(x: 4 + offset)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                guard enabled else { return }
+                                offset = min(max(0, value.translation.width), maxX)
+                            }
+                            .onEnded { _ in
+                                let moved = offset
+                                withAnimation(.spring(duration: 0.3)) { offset = 0 }
+                                guard enabled else { return }
+                                if moved > maxX * 0.85 {
+                                    Haptics.tap()
+                                    onSlide()
+                                } else if moved < 8 {
+                                    onTap()
+                                }
+                            }
+                    )
+            }
+        }
+        .frame(height: 58)
+        .opacity(enabled || busy ? 1 : 0.45)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { if enabled { onSlide() } }
+    }
+}
+
+// MARK: - Round dock button
+
+struct DockButton: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    let on: Bool
+    let busy: Bool
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button { Haptics.tap(); action() } label: {
+            VStack(spacing: 6) {
+                ZStack {
+                    if busy {
+                        ProgressView()
+                    } else {
+                        Image(systemName: symbol).font(.system(size: 20, weight: .semibold))
+                    }
+                }
+                .frame(width: 56, height: 56)
+                .glass(Circle(), tint: on ? tint.opacity(0.45) : nil, interactive: true)
+                Text(title).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled || busy ? 1 : 0.45)
+        .accessibilityLabel(title)
+        .accessibilityValue(on ? "On" : "")
+    }
+}
+
+// MARK: - Home tiles
+
+struct TileButton<Content: View>: View {
+    let action: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Button { Haptics.tap(); action() } label: {
+            content()
+                .frame(maxWidth: .infinity, minHeight: 84, maxHeight: 84, alignment: .topLeading)
+                .glassCard(22, interactive: true)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct TileLabel: View {
+    let text: String
+    let symbol: String
+    var body: some View {
+        Label(text, systemImage: symbol)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+}
+
+struct FuelTile: View {
+    let percent: Int?
+    let age: Int?
+
+    private var tint: Color {
+        guard let p = percent else { return .secondary }
+        return p <= 12 ? .red : (p <= 25 ? .orange : Palette.accent)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TileLabel(text: "Fuel", symbol: "fuelpump")
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().stroke(Color.primary.opacity(0.12), lineWidth: 5)
+                    Circle()
+                        .trim(from: 0, to: Double(percent ?? 0) / 100)
+                        .stroke(tint, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 34, height: 34)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(percent.map { "\($0)%" } ?? "--")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text(percent == nil ? "No reading yet" : (updatedText(age)?.replacingOccurrences(of: "Updated ", with: "") ?? "Fuel left"))
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+        }
+        .padding(12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(percent.map { "Fuel \($0) percent left" } ?? "Fuel level unknown")
+    }
+}
+
+struct TireTile: View {
+    let psi: [Double]?
+    private let low = 30.0
+    private let names = ["Front left", "Front right", "Rear left", "Rear right"]
+
+    var body: some View {
+        let lowIndexes = (psi ?? []).enumerated().filter { $0.element < low }.map { $0.offset }
+        VStack(alignment: .leading, spacing: 6) {
+            TileLabel(text: "Tires", symbol: "circle.circle")
+            if let psi {
+                Text(lowIndexes.isEmpty ? "All good" : "\(lowIndexes.count) low")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(lowIndexes.isEmpty ? Palette.good : .orange)
+                Text(lowIndexes.first.map { "\(names[$0]) · \(Int(psi[$0].rounded())) psi" }
+                     ?? "\(Int((psi.min() ?? 0).rounded()))–\(Int((psi.max() ?? 0).rounded())) psi")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            } else {
+                Text("Not set up").font(.system(size: 20, weight: .bold, design: .rounded))
+                Text("See the Vehicle tab").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct AlarmTile: View {
+    let status: CarStatus
+
+    var body: some View {
+        let (title, tint, sub): (String, Color, String) = {
+            if status.alarmTriggered { return ("Went off", .red, "Tap for details") }
+            if status.panicOn { return ("Panic on", .red, "Horn and lights") }
+            switch status.lock {
+            case .locked: return ("Armed", Palette.good, "Doors locked")
+            case .unlocked: return ("Not armed", .secondary, "Doors unlocked")
+            case .unknown: return ("Unknown", .secondary, "Lock to arm")
+            }
+        }()
+        VStack(alignment: .leading, spacing: 6) {
+            TileLabel(text: "Alarm", symbol: "shield")
+            Text(title)
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+            Text(sub).font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Small static map of where the car is; tap to open the Location tab.
+struct MapTile: View {
+    @EnvironmentObject private var car: CarController
+    @EnvironmentObject private var locator: CarLocator
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            if let spot = car.mapSpot(locator: locator) {
+                Map(initialPosition: .region(MKCoordinateRegion(center: spot, latitudinalMeters: 450, longitudinalMeters: 450)),
+                    interactionModes: []) {
+                    Annotation("", coordinate: spot) {
+                        Circle().fill(Palette.accent).frame(width: 14, height: 14)
+                            .overlay(Circle().stroke(.white, lineWidth: 2))
+                    }
+                    UserAnnotation()
+                }
+                .mapStyle(.standard(pointsOfInterest: .excludingAll))
+                .id(car.selectedVehicleID)
+                .allowsHitTesting(false)
+            } else {
+                LinearGradient(colors: [Color.primary.opacity(0.08), Color.primary.opacity(0.02)],
+                               startPoint: .top, endPoint: .bottom)
+                Image(systemName: "map")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Text(caption)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .glass(Capsule())
+                .padding(8)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Location. \(caption)")
+    }
+
+    private var caption: String {
+        guard let spot = car.mapSpot(locator: locator) else { return "Find my car" }
+        guard let me = locator.me else { return "Car location" }
+        let meters = me.distance(from: CLLocation(latitude: spot.latitude, longitude: spot.longitude))
+        if meters < 15 { return "Right here" }
+        return Measurement(value: meters, unit: UnitLength.meters)
+            .formatted(.measurement(width: .abbreviated, usage: .road)) + " away"
     }
 }
 
@@ -297,122 +612,7 @@ struct StatusCard: View {
     }
 }
 
-// MARK: - Hold-to-start button
-
-struct StartButton: View {
-    let status: CarStatus
-    let busy: Bool
-    let enabled: Bool
-    let onHold: () -> Void
-    let onShortTap: () -> Void
-
-    @State private var pressing = false
-    @State private var fired = false
-    private let holdSeconds = 1.0
-
-    private var running: Bool { status.engineRunning }
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.clear)
-                .glass(Circle(), tint: running ? Palette.accent.opacity(0.6) : nil, interactive: true)
-                .shadow(color: running ? Palette.accent.opacity(0.5) : .clear, radius: 36)
-
-            Circle().stroke(Palette.stroke, lineWidth: 10).padding(6)
-
-            Circle()
-                .trim(from: 0, to: pressing ? 1 : 0)
-                .stroke(running ? Color.white : Palette.accent,
-                        style: StrokeStyle(lineWidth: 10, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .padding(6)
-                .animation(pressing ? .linear(duration: holdSeconds) : .easeOut(duration: 0.2), value: pressing)
-
-            VStack(spacing: 6) {
-                if busy {
-                    ProgressView().controlSize(.large).tint(.white)
-                } else {
-                    Image(systemName: "power").font(.system(size: 42, weight: .semibold))
-                }
-                Text(title)
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                Text(hint).font(.footnote).foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: 220, height: 220)
-        .contentShape(Circle())
-        .opacity(enabled || busy ? 1 : 0.4)
-        .onLongPressGesture(minimumDuration: holdSeconds, maximumDistance: 40) {
-            fired = true
-            Haptics.tap()
-            onHold()
-        } onPressingChanged: { isPressing in
-            if isPressing {
-                fired = false
-                pressing = enabled
-            } else {
-                pressing = false
-                if enabled && !fired { onShortTap() }   // let go too early: explain the gesture
-            }
-        }
-        .allowsHitTesting(enabled)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(running ? "Stop engine" : "Start engine")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { if enabled { onHold() } }
-    }
-
-    private var title: String {
-        if busy { return running ? "Stopping…" : "Starting…" }
-        if pressing { return "Keep holding" }
-        guard running else { return "Start" }
-        if status.secondsRemaining > 0 {
-            return String(format: "%d:%02d", status.secondsRemaining / 60, status.secondsRemaining % 60)
-        }
-        return "Running"
-    }
-
-    private var hint: String {
-        if busy { return " " }
-        if pressing { return running ? "to stop" : "to start" }
-        return running ? "Hold to stop" : "Press and hold"
-    }
-}
-
-// MARK: - Small components
-
-struct DoorButton: View {
-    let title: String
-    let symbol: String
-    let tint: Color
-    let current: Bool
-    let busy: Bool
-    let enabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button { Haptics.tap(); action() } label: {
-            HStack(spacing: 8) {
-                if busy { ProgressView().tint(.white) }
-                else { Image(systemName: symbol).font(.system(size: 18, weight: .semibold)) }
-                Text(title).font(.subheadline.weight(.semibold))
-                if current && !busy {
-                    Image(systemName: "checkmark.circle.fill").font(.footnote)
-                }
-            }
-            .foregroundStyle(current ? tint : .primary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .glassCard(18, tint: current ? tint.opacity(0.4) : nil, interactive: true)
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled || busy ? 1 : 0.45)
-        .accessibilityValue(current ? "Current" : "")
-    }
-}
+// MARK: - Banner
 
 struct BannerView: View {
     let banner: Banner

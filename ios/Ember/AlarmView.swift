@@ -83,17 +83,17 @@ struct AlarmView: View {
             switch car.status.lock {
             case .locked: return ("lock.shield.fill", Palette.good, "Armed", "The doors are locked, so the alarm is on.")
             case .unlocked: return ("lock.open.fill", .secondary, "Not armed", "The doors are unlocked. Lock them to turn the alarm on.")
-            case .unknown: return ("shield.lefthalf.filled", .secondary, "Status unknown", "Lock the car from the Remote tab to make sure the alarm is on.")
+            case .unknown: return ("shield.lefthalf.filled", .secondary, "Status unknown", "Lock the car from the Home tab to make sure the alarm is on.")
             }
         }()
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 16) {
-                CarTopView(lowTires: [false, false, false, false],
-                           hazards: car.status.hazardsOn,
-                           panic: car.status.panicOn,
-                           alarmGlow: car.status.alarmTriggered,
-                           bodyColor: car.selectedVehicle.color.swatch)
-                    .frame(width: 56, height: 112)
+                VehicleSilhouette(type: car.selectedVehicle.type,
+                                  color: car.selectedVehicle.color.swatch,
+                                  hazards: car.status.hazardsOn,
+                                  panic: car.status.panicOn,
+                                  alarm: car.status.alarmTriggered)
+                    .frame(width: 110, height: 56)
                     .overlay(alignment: .bottomTrailing) {
                         Image(systemName: icon)
                             .font(.system(size: 14, weight: .bold))
