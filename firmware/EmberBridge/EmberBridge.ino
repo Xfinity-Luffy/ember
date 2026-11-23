@@ -321,6 +321,10 @@ void setup() {
     Serial.println("ERROR: EMBER_PASSKEY must be 6 digits and not start with 0. Halting.");
     while (true) delay(1000);
   }
+  if (EMBER_PASSKEY == 123456) {
+    Serial.println("ERROR: EMBER_PASSKEY is still the example 123456. Pick your own in config.h. Halting.");
+    while (true) delay(1000);
+  }
 
   setCpuFrequencyMhz(80);  // saves power; BLE runs fine at 80 MHz
 

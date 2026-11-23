@@ -1,6 +1,6 @@
 # Ember — phone remote for a 2021 Mazda3
 
-Ember lets your iPhone lock, unlock, start and stop your car over Bluetooth, and trigger rear defrost while the engine runs. It's your own app and design. It doesn't use Mazda's servers, subscription or branding.
+Ember lets your iPhone lock, unlock, start and stop your car over Bluetooth, and turn on rear defrost. It's your own app and design. It doesn't use Mazda's servers, subscription or branding.
 
 ```
  iPhone (Ember app)  ──Bluetooth──▶  ESP32 "Ember Bridge"  ──relays──▶  Fortin remote-start module  ──▶  car
@@ -9,7 +9,15 @@ Ember lets your iPhone lock, unlock, start and stop your car over Bluetooth, and
 | Folder | What it is |
 |---|---|
 | `ios/Ember/` | The iPhone app (SwiftUI, iOS 17+). Starts in **demo mode**, so you can try it right away. |
+| `ios/tools/` | Draws the app icon during the build. |
 | `firmware/EmberBridge/` | Firmware for the ESP32 board in the car. Settings live in `config.h`. |
+| `.github/workflows/` | The cloud build that turns the code into an installable `Ember.ipa`. |
+
+### What's in the app
+
+- **Main screen:** a status card in plain English, a press-and-hold power button (a quick tap explains the gesture), an "Also turn on rear defrost" switch, and Lock / Unlock with the current state checked.
+- **Look:** Liquid Glass on iOS 26 (frosted glass on iOS 17–18) over a slowly drifting night-sky background that glows warmer while the engine runs.
+- **Settings:** car name, demo mode, connection status, bridge key, Face ID for Unlock and Start, defrost with every start, vibration feedback, "Find my bridge again", and pairing help.
 
 ---
 
@@ -19,35 +27,31 @@ Pick **1A** if you only have a Windows PC, or **1B** if you have a Mac.
 
 ### 1A. From a Windows PC (GitHub builds it, Sideloadly installs it)
 
-**One-time setup**
+The repository **github.com/Xfinity-Luffy/ember** builds the app by itself every time code under `ios/` changes. You can also start a build any time from **Actions › Build iPhone app › Run workflow**.
 
-1. Create a free account at **github.com**, then click **New repository**. Name it `ember`. Public or private both work: your secret key is never in the code. Public gives unlimited free build time. Private gives about 200 free Mac build minutes a month, which is roughly 20 builds.
-2. Install **GitHub Desktop** (desktop.github.com) and sign in. Choose **File › Clone repository**, pick `ember`, and note the folder it creates.
-3. Unzip `ember.zip` and copy everything *inside* the `ember` folder into that cloned folder, **including the hidden `.github` folder**. You should end up with `.github`, `firmware`, `ios` and `README.md` at the top level.
-4. In GitHub Desktop, type a summary like "First upload", click **Commit to main**, then **Push origin**.
+**Get the app file**
 
-**Build the app**
-
-5. On github.com, open your repo › **Actions** tab. If asked, click the button to enable workflows.
-6. Click **Build iPhone app** › **Run workflow** › **Run workflow**. (Later pushes that change `ios/` start it automatically.)
-7. Wait about 5–10 minutes for a green check. Open the run, scroll to **Artifacts**, and download **Ember-ipa**. Unzip it to get `Ember.ipa`.
+1. Open the repository's **Actions** tab and click the newest **Build iPhone app** run with a green check.
+2. Scroll to **Artifacts** and download **Ember-ipa**. Unzip it to get `Ember.ipa`.
    *Red ✗ instead?* Download the **build-log** artifact and send it to Claude to fix.
 
 **Install it**
 
-8. Install **iTunes from apple.com/itunes** (the Microsoft Store version does **not** work with Sideloadly), then **Sideloadly** from sideloadly.io.
-9. Plug your iPhone into the PC with a cable. Tap **Trust** on the phone if asked.
-10. In Sideloadly, pick your iPhone, type your Apple ID, drag `Ember.ipa` onto the window, and click **Start**. Enter your Apple ID password and the 2-factor code when asked. These go to Apple, not Sideloadly. Some people prefer a spare Apple ID for this.
-11. On the iPhone:
-    - **Settings › General › VPN & Device Management** › tap your Apple ID › **Trust**.
-    - **Settings › Privacy & Security › Developer Mode** › turn on, then restart when asked.
-12. Open **Ember**. It starts in demo mode.
+3. Install **iTunes from apple.com/itunes** (the Microsoft Store version does **not** work with Sideloadly), then **Sideloadly** from sideloadly.io.
+4. Plug your iPhone into the PC with a cable. Tap **Trust** on the phone if asked.
+5. In Sideloadly, pick your iPhone, type your Apple ID, drag `Ember.ipa` onto the window, and click **Start**. Enter your Apple ID password and the 2-factor code when asked. These go to Apple, not Sideloadly. Some people prefer a spare Apple ID for this.
+6. On the iPhone:
+   - **Settings › General › VPN & Device Management** › tap your Apple ID › **Trust**.
+   - **Settings › Privacy & Security › Developer Mode** › turn on, then restart when asked.
+7. Open **Ember**. It starts in demo mode.
 
-**The 7-day limit:** with a free Apple ID the app stops opening after 7 days. In Sideloadly's options, turn on **automatic refresh** when you install. Your PC then re-signs the app in the background whenever the iPhone is connected by cable or on the same Wi-Fi. If it lapses, just repeat step 10; your settings and key are kept.
+**The 7-day limit:** with a free Apple ID the app stops opening after 7 days. In Sideloadly's options, turn on **automatic refresh** when you install. Your PC then re-signs the app in the background whenever the iPhone is connected by cable or on the same Wi-Fi. If it lapses, just repeat step 5; your settings and key are kept.
+
+**Changing files on GitHub in the browser:** use **Add file › Upload files** and drag in only the files you changed. Each one must land in its folder (for example `ios/Ember/ContentView.swift`). Open that folder on GitHub first, then upload, so the files go to the right place.
 
 ### 1B. From a Mac with Xcode
 
-You need a **Mac with Xcode 16 or newer** (free from the Mac App Store) and your iPhone.
+You need a **Mac with Xcode 26 or newer** (free from the Mac App Store; older Xcode can't build the Liquid Glass code) and your iPhone.
 *(Shortcut: `brew install xcodegen`, then run `xcodegen generate` in the `ios` folder and open `Ember.xcodeproj`. Steps 1–4 below are then already done except picking your Team. Run `python3 tools/make_icon.py Ember/Assets.xcassets/AppIcon.appiconset/icon.png` first to draw the app icon.)*
 
 1. Xcode › **File › New › Project › iOS › App**. Name it `Ember`, Interface **SwiftUI**, Language **Swift**.
@@ -109,7 +113,7 @@ Pin numbers are set in `config.h`, so you can change them. Never connect 12 V di
 2. **Settings › Additional boards manager URLs:** add `https://espressif.github.io/arduino-esp32/package_esp32_index.json`, then install **esp32 by Espressif** from Boards Manager.
 3. **Library Manager:** install **NimBLE-Arduino** by h2zero, **version 2.x**.
 4. Open `firmware/EmberBridge/EmberBridge.ino` and edit `config.h`:
-   - `EMBER_PASSKEY`: choose your own 6-digit number.
+   - `EMBER_PASSKEY`: choose your own 6-digit number. The bridge refuses to run with the example `123456`.
    - `EMBER_SECRET_HEX`: run `openssl rand -hex 32` in Terminal and paste the 64-character result. **Keep this private.**
    - `RUN_TIME_MINUTES`: match the run time programmed in the Fortin module.
    - If the status input isn't wired, set `PIN_RUN_STATUS` to `-1`.

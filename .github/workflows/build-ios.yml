@@ -1,12 +1,17 @@
 # Builds the Ember iPhone app on a GitHub-hosted Mac and publishes an unsigned
 # Ember.ipa you can install from Windows with Sideloadly.
-# Works whether the files are in folders (ios/...) or all uploaded loose at the top.
+#
+# Runs by itself when files under ios/ change, or on demand:
+# GitHub > Actions > "Build iPhone app" > Run workflow.
 
 name: Build iPhone app
 
 on:
   workflow_dispatch:
   push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ios.yml"
 
 jobs:
   build:
@@ -16,23 +21,6 @@ jobs:
     steps:
       - name: Get the code
         uses: actions/checkout@v4
-
-      - name: Put loose files into folders
-        run: |
-          if [ ! -d ios/Ember ]; then
-            mkdir -p ios/Ember/Assets.xcassets/AppIcon.appiconset ios/tools
-            mv ./*.swift ios/Ember/
-            mv project.yml ios/
-            mv make_icon.py ios/tools/
-            printf '%s\n' '{ "info" : { "author" : "xcode", "version" : 1 } }' > ios/Ember/Assets.xcassets/Contents.json
-            printf '%s\n' '{' \
-              '  "images" : [' \
-              '    { "filename" : "icon.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" }' \
-              '  ],' \
-              '  "info" : { "author" : "xcode", "version" : 1 }' \
-              '}' > ios/Ember/Assets.xcassets/AppIcon.appiconset/Contents.json
-          fi
-          find ios -type f | sort
 
       - name: Show Xcode version
         run: xcodebuild -version

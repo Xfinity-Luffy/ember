@@ -10,6 +10,7 @@
 
 // 6-digit passkey iOS asks for the first time your phone pairs with the bridge.
 // Pick your own. Must be 6 digits and must not start with 0.
+// The firmware refuses to run while this is still the example 123456.
 #define EMBER_PASSKEY        123456
 
 // 32-byte shared secret, written as 64 hex characters.
