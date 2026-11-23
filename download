@@ -1,0 +1,7 @@
+ios/build/
+ios/Payload/
+ios/*.ipa
+ios/Ember.xcodeproj/
+ios/Support/
+ios/xcodebuild.log
+ios/Ember/Assets.xcassets/AppIcon.appiconset/icon.png
