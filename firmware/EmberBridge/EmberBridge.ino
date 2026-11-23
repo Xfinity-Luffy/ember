@@ -69,7 +69,8 @@ static const size_t MAC_LEN   = 16;   // truncated HMAC-SHA256
 static const uint8_t DOMAIN[4] = {'E', 'M', 'B', 'R'};
 
 // ---- State ----------------------------------------------------------------
-struct QueuedCommand { uint8_t cmd; uint8_t preResult; };  // preResult != RES_NONE => reject without acting
+// preResult != RES_NONE => reject without acting. fromLte/nonce: came over cellular; report result back.
+struct QueuedCommand { uint8_t cmd; uint8_t preResult; uint8_t fromLte; uint8_t nonce[8]; };
 
 static uint8_t  secretKey[32];
 static uint8_t  nonce[NONCE_LEN];
@@ -221,11 +222,14 @@ static void buildStatus(uint8_t* p) {
   p[8] = pn & 0xFF; p[9] = pn >> 8;
 }
 
+static void lteSnapshotStatus(const uint8_t* p);   // EmberLTE.h
+
 static void publishStatus(bool force) {
   uint8_t p[STATUS_LEN];
   buildStatus(p);
   if (!force && memcmp(p, lastStatusSent, sizeof(p)) == 0) return;
   memcpy(lastStatusSent, p, sizeof(p));
+  lteSnapshotStatus(p);
   statusChar->setValue(p, sizeof(p));
   if (NimBLEDevice::getServer()->getConnectedCount() > 0) statusChar->notify();
 }
@@ -341,6 +345,9 @@ static void updateHazardsAndAlarm() {
   if (panicOn && secondsUntil(panicEndMs) == 0)       { pulse(PIN_PANIC);  panicOn = false; }
   if (PIN_ALARM_INPUT >= 0 && digitalRead(PIN_ALARM_INPUT) == ALARM_ACTIVE_LEVEL) alarmTriggered = true;
 }
+
+// ---- Optional LTE + GPS ------------------------------------------------------
+#include "EmberLTE.h"
 
 // ---- Command execution (runs in loop(), never inside a BLE callback) ------
 static uint8_t execute(uint8_t cmd) {
@@ -537,6 +544,7 @@ void setup() {
   newChallenge();
   obdSetup();
   publishVehicle(true);
+  lteSetup();
   updateEngineState();
   publishStatus(true);
 
@@ -554,6 +562,7 @@ void loop() {
   if (xQueueReceive(cmdQueue, &q, pdMS_TO_TICKS(250)) == pdTRUE) {
     lastResult = (q.preResult != RES_NONE) ? q.preResult : execute(q.cmd);
     commandSeq++;
+    if (q.fromLte) lteRecordAck(q.nonce, lastResult);
     Serial.printf("Command 0x%02X -> result %u\n", q.cmd, lastResult);
     updateEngineState();
     publishStatus(true);

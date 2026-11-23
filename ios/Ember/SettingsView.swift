@@ -30,7 +30,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { car.relayHostChanged(); dismiss() } }
             }
             .confirmationDialog("Remove the bridge key from this iPhone?",
                                 isPresented: $confirmRemoveKey, titleVisibility: .visible) {
@@ -68,10 +68,42 @@ struct SettingsView: View {
         SettingsSection("Connection",
                         footer: car.demoMode
                             ? "Demo mode uses a pretend car so you can try everything without the bridge."
-                            : "Ember talks to your car over Bluetooth, within about 30 feet.") {
+                            : "Bluetooth and cellular both use the same bridge key, and every command is signed with it.") {
             ToggleRow(icon: "sparkles", color: Palette.accentSoft,
                       title: "Demo mode", subtitle: "Practice with a pretend car",
                       isOn: $car.demoMode)
+            if !car.demoMode {
+                Divider().overlay(Palette.stroke)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 14) {
+                        RowIcon(car.connectionMode == .bluetooth ? "dot.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right",
+                                Palette.cool)
+                        Text("Connect using").font(.body.weight(.medium))
+                    }
+                    Picker("Connect using", selection: $car.connectionMode) {
+                        ForEach(ConnectionMode.allCases) { mode in Text(mode.title).tag(mode) }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(car.connectionMode.explanation)
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                if car.connectionMode != .bluetooth {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Relay server").font(.subheadline.weight(.medium))
+                        TextField("ember-relay.yourname.workers.dev", text: $car.relayHost)
+                            .font(.system(.footnote, design: .monospaced))
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                            .submitLabel(.done)
+                            .onSubmit { car.relayHostChanged() }
+                            .padding(12)
+                            .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
+                        Text("Shown at the end of the server deploy on GitHub (see README, \"Cellular\").")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+            }
             Divider().overlay(Palette.stroke)
             HStack(spacing: 14) {
                 RowIcon("antenna.radiowaves.left.and.right", car.link.isUsable ? Palette.good : .secondary)

@@ -8,6 +8,7 @@ final class DemoTransport: CarTransport {
     var onStatus: ((CarStatus) -> Void)?
     var onError: ((String) -> Void)?
     var onVehicle: ((VehicleInfo) -> Void)?
+    var onCellular: ((CellularUpdate) -> Void)?
 
     private var status = CarStatus()
     private var ticker: Task<Void, Never>?

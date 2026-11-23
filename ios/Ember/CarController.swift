@@ -12,12 +12,34 @@ struct Banner: Identifiable, Equatable {
 
 enum AppTab: Hashable { case remote, vehicle, hazards, alarm, location }
 
+/// How the app reaches the car.
+enum ConnectionMode: String, CaseIterable, Identifiable {
+    case bluetooth, cellular, automatic
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .bluetooth: return "Bluetooth"
+        case .cellular: return "Cellular"
+        case .automatic: return "Automatic"
+        }
+    }
+    var explanation: String {
+        switch self {
+        case .bluetooth: return "Works within about 30 feet of the car. No extra hardware or data plan."
+        case .cellular: return "Works from anywhere through your relay server. Needs the bridge's LTE module and a data plan."
+        case .automatic: return "Bluetooth when you're near the car, cellular when you're not. Recommended if you have LTE."
+        }
+    }
+}
+
 /// The app's single source of truth: link state, car status, and commands.
 @MainActor
 final class CarController: ObservableObject {
     @Published private(set) var link: LinkState = .searching
     @Published private(set) var status = CarStatus()
     @Published private(set) var vehicle = VehicleInfo()
+    /// Latest cellular check-in from the car (location, time), if using cellular.
+    @Published private(set) var cellular: CellularUpdate?
     /// When this phone first saw the "alarm went off" warning.
     @Published private(set) var alarmTriggeredAt: Date?
     @Published private(set) var pending: CarCommand?
@@ -42,6 +64,16 @@ final class CarController: ObservableObject {
     @Published var hapticsOn: Bool {
         didSet { UserDefaults.standard.set(hapticsOn, forKey: Haptics.enabledKey) }
     }
+    @Published var connectionMode: ConnectionMode {
+        didSet {
+            UserDefaults.standard.set(connectionMode.rawValue, forKey: Keys.mode)
+            rebuildTransport()
+        }
+    }
+    /// Your relay server's address, e.g. ember-relay.yourname.workers.dev
+    @Published var relayHost: String {
+        didSet { UserDefaults.standard.set(relayHost, forKey: Keys.relay) }
+    }
     /// Turn on rear defrost automatically after a remote start.
     @Published var defrostOnStart: Bool {
         didSet { UserDefaults.standard.set(defrostOnStart, forKey: Keys.defrost) }
@@ -55,6 +87,8 @@ final class CarController: ObservableObject {
         static let name = "ember.carName"
         static let defrost = "ember.defrostOnStart"
         static let faceID = "ember.requireFaceID"
+        static let mode = "ember.connectionMode"
+        static let relay = "ember.relayHost"
     }
 
     init() {
@@ -63,6 +97,8 @@ final class CarController: ObservableObject {
         carName = defaults.string(forKey: Keys.name) ?? "My Car"
         defrostOnStart = defaults.bool(forKey: Keys.defrost)
         requireFaceID = defaults.bool(forKey: Keys.faceID)
+        connectionMode = ConnectionMode(rawValue: defaults.string(forKey: Keys.mode) ?? "") ?? .bluetooth
+        relayHost = defaults.string(forKey: Keys.relay) ?? ""
         hapticsOn = defaults.object(forKey: Haptics.enabledKey) as? Bool ?? true
         rebuildTransport()
     }
@@ -184,15 +220,28 @@ final class CarController: ObservableObject {
 
     // MARK: Lifecycle
 
+    /// Call after the relay address changes, so cellular uses the new one.
+    func relayHostChanged() {
+        if connectionMode != .bluetooth && !demoMode { rebuildTransport() }
+    }
+
     func appBecameActive() {
         transport?.start()   // reconnects if the link dropped while in the background
     }
 
     private func rebuildTransport() {
         transport?.stop()
-        let t: CarTransport = demoMode
-            ? DemoTransport()
-            : BLETransport(secret: { SecretStore.load().map { SymmetricKey(data: $0) } })
+        let key = { SecretStore.load().map { SymmetricKey(data: $0) } }
+        let t: CarTransport
+        if demoMode {
+            t = DemoTransport()
+        } else {
+            switch connectionMode {
+            case .bluetooth: t = BLETransport(secret: key)
+            case .cellular: t = CloudTransport(host: relayHost, key: key)
+            case .automatic: t = AutoTransport(ble: BLETransport(secret: key), cloud: CloudTransport(host: relayHost, key: key))
+            }
+        }
         t.onLinkChange = { [weak self] in self?.link = $0 }
         t.onStatus = { [weak self] new in
             guard let self else { return }
@@ -206,10 +255,12 @@ final class CarController: ObservableObject {
         }
         t.onError = { [weak self] in self?.show($0, kind: .error) }
         t.onVehicle = { [weak self] in self?.vehicle = $0 }
+        t.onCellular = { [weak self] in self?.cellular = $0 }
         transport = t
         status = CarStatus()
         vehicle = VehicleInfo()
-        link = demoMode ? .demo : .searching
+        cellular = nil
+        link = demoMode ? .demo : (connectionMode == .cellular ? .cellularWaiting : .searching)
         t.start()
     }
 

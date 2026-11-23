@@ -21,6 +21,7 @@ Ember lets your iPhone lock, unlock, start and stop your car over Bluetooth, and
 - **Hazards tab:** a big blinking triangle to turn the hazard lights on or off, with an automatic 10-minute shut-off.
 - **Alarm tab:** armed or not (from the lock state), a warning when the alarm went off, and a press-and-hold panic button.
 - **Location tab:** a live map of where your car is. While the app is connected to the bridge, your phone is at the car, so the car's spot updates live; after you walk away it keeps the last spot with the address, how long ago, how far you are, and walking directions. No extra hardware, and the location never leaves your iPhone. (Tracking the car from anywhere, e.g. if it's stolen, would need a GPS + cellular board in the car.)
+- **Connection:** Bluetooth (default), Cellular, or Automatic (Bluetooth when near, cellular when away). Cellular is optional and needs the LTE module and relay server below.
 - **Settings:** car name, demo mode, connection status, bridge key, Face ID for Unlock and Start, defrost with every start, vibration feedback, "Find my bridge again", and pairing help.
 
 ---
@@ -161,6 +162,54 @@ The bridge only *reads*: it sends the standard "fuel tank level" request and nev
 After that, the app reconnects automatically whenever you open it near the car.
 
 ---
+
+## 6. Optional: Cellular (control and track the car from anywhere)
+
+Bluetooth reaches about 30 feet. With the optional LTE module, the bridge checks in over the cellular network through a small relay server you own, so the app works from anywhere, and the Location tab shows the car's own GPS position, even while it's moving.
+
+```
+ iPhone ──internet──▶ your relay server (Cloudflare, free) ◀──LTE── bridge + SIM7080G ──▶ car
+```
+
+**Extra parts**
+
+| Part | Notes |
+|---|---|
+| SIM7080G LTE-M / NB-IoT + GPS module with a UART header (e.g. a SIM7080G breakout or HAT) | Has separate LTE and GPS antenna connectors. |
+| LTE antenna and active GPS antenna | Put the GPS antenna where it can see the sky (under the rear window or dash top). |
+| An IoT SIM with LTE-M data | From an IoT data provider; check it covers LTE-M where you live. Note its APN. |
+
+**Wiring (to the existing ESP32)**
+
+```
+ ESP32 GPIO19 (TX) ──▶ modem RXD        ESP32 GPIO34 (RX) ◀── modem TXD
+ ESP32 GPIO23      ──▶ modem PWRKEY     GND ─── GND
+ Modem power: from the 12 V → 5 V converter (the modem needs its own supply; don't run it from the ESP32's 3.3 V pin)
+```
+
+Confirm your module's pin labels and whether its PWRKEY is pressed by HIGH or LOW (`MODEM_PWRKEY_ACTIVE`).
+
+**1. Deploy the relay server (free Cloudflare account, all in the browser)**
+
+1. Sign up at **dash.cloudflare.com**. On the dashboard, copy your **Account ID**.
+2. **My Profile › API Tokens › Create Token** › use the **Edit Cloudflare Workers** template › create, and copy the token.
+3. On GitHub: your repository › **Settings › Secrets and variables › Actions › New repository secret**. Add two secrets: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+4. **Actions › Deploy relay server › Run workflow.** When it finishes, its summary shows your relay address, something like `ember-relay.yourname.workers.dev`.
+
+**2. Turn on LTE in the bridge**
+
+In `config.h`: set `LTE_ENABLED` to `1`, `RELAY_HOST` to your relay address, and `LTE_APN` to your SIM's APN. Flash it. The Serial Monitor shows `LTE: car ID ...` and then `LTE: modem ready`.
+
+**3. Turn it on in the app**
+
+**Settings › Connection › Connect using › Automatic** (or Cellular), and paste the relay address.
+
+**What to expect**
+- **Command speed:** a parked car checks in about once a minute, so the first cellular command can take up to a minute. While the app is open, the car switches to checking in every few seconds for 2 minutes. All of this is adjustable in `config.h`.
+- **GPS and LTE take turns:** this modem can't use both at once. The bridge gets a GPS fix, then sends it. Parked, it refreshes GPS every 10 minutes; while driving, every check-in.
+- **Data use:** each check-in is a few hundred bytes plus connection overhead. At the default settings, expect roughly tens of megabytes a month. Check what your plan includes.
+- **Battery:** the modem draws more than Bluetooth alone. For a car parked for weeks, unplug the bridge's fuse or raise `PARKED_REPORT_SECONDS`.
+- **Security:** commands are signed on your phone with the bridge key and checked by the car (5-minute expiry, each one usable once), so the relay server, which never has your key, can't fake or replay them. Reports are signed by the car, and the app ignores anything else. One gap: the modem doesn't yet verify the server's HTTPS certificate, so someone able to intercept your car's cellular traffic could read its check-ins (including location), though not control the car.
 
 ## How security works
 

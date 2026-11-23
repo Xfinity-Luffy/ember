@@ -1,6 +1,7 @@
 import Foundation
 import CoreBluetooth
 import CryptoKit
+import Security
 
 /// Wire protocol shared with the Ember Bridge firmware (EmberBridge.ino).
 /// If you change anything here, change it there too.
@@ -154,6 +155,10 @@ enum LinkState: Equatable {
     case connecting
     case ready
     case demo
+    /// Talking to the car through the relay server over cellular.
+    case cellular
+    /// Cellular is set up but the car hasn't checked in recently.
+    case cellularWaiting
 
     var label: String {
         switch self {
@@ -163,9 +168,11 @@ enum LinkState: Equatable {
         case .connecting: return "Connecting"
         case .ready: return "Connected"
         case .demo: return "Demo mode"
+        case .cellular: return "Connected via cellular"
+        case .cellularWaiting: return "Waiting for the car"
         }
     }
-    var isUsable: Bool { self == .ready || self == .demo }
+    var isUsable: Bool { self == .ready || self == .demo || self == .cellular }
 }
 
 enum CarError: LocalizedError {
@@ -190,8 +197,82 @@ protocol CarTransport: AnyObject {
     var onStatus: ((CarStatus) -> Void)? { get set }
     var onError: ((String) -> Void)? { get set }
     var onVehicle: ((VehicleInfo) -> Void)? { get set }
+    var onCellular: ((CellularUpdate) -> Void)? { get set }
     func start()
     func stop()
     /// Sends a command and returns once the bridge reports a result.
     func send(_ command: CarCommand) async throws
+}
+
+// MARK: - Cellular (LTE) protocol, shared with EmberLTE.h and server/src/index.js
+
+/// What the car last reported over cellular.
+struct CellularUpdate: Equatable {
+    /// When the relay received the report.
+    var checkIn: Date
+    var latitude: Double?
+    var longitude: Double?
+    var speedKmh: Double?
+    /// When the GPS fix was taken.
+    var fixTime: Date?
+}
+
+enum EmberCloud {
+    private static func mac(_ label: String, _ parts: [Data], key: SymmetricKey) -> Data {
+        var message = Data(label.utf8)
+        for p in parts { message.append(p) }
+        return Data(HMAC<SHA256>.authenticationCode(for: message, using: key))
+    }
+
+    /// carId = first 8 bytes of HMAC(key,"EMBR-ID"); token = first 16 of HMAC(key,"EMBR-API").
+    static func ids(key: SymmetricKey) -> (carId: String, token: String) {
+        (mac("EMBR-ID", [], key: key).prefix(8).hex, mac("EMBR-API", [], key: key).prefix(16).hex)
+    }
+
+    /// [cmd][unix time BE 4][nonce 8][HMAC(key,"EMBR-LTE"||first 13 bytes)[0..16]]
+    static func commandPacket(_ command: CarCommand, key: SymmetricKey, now: Date = Date()) -> (hex: String, nonceHex: String) {
+        let t = UInt32(now.timeIntervalSince1970)
+        var head = Data([command.rawValue, UInt8(t >> 24), UInt8((t >> 16) & 0xFF), UInt8((t >> 8) & 0xFF), UInt8(t & 0xFF)])
+        var nonce = Data(count: 8)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 8, $0.baseAddress!) }
+        head.append(nonce)
+        let packet = head + mac("EMBR-LTE", [head], key: key).prefix(16)
+        return (packet.hex, nonce.hex)
+    }
+
+    /// The car signs every report: X-Ember-Sig = HMAC(key,"EMBR-RPT"||body)[0..16].
+    static func reportIsGenuine(_ body: String, sigHex: String, key: SymmetricKey) -> Bool {
+        mac("EMBR-RPT", [Data(body.utf8)], key: key).prefix(16).hex == sigHex.lowercased()
+    }
+}
+
+/// The car's report, as JSON (see buildReport in EmberLTE.h).
+struct CloudReport: Decodable {
+    struct Ack: Decodable { let id: String; let r: UInt8 }
+    let v: Int
+    let t: UInt32
+    let st: String
+    let fuel: Int?
+    let lat: Double?
+    let lon: Double?
+    let spd: Double?
+    let fix: UInt32?
+    let ack: [Ack]?
+}
+
+extension Data {
+    var hex: String { map { String(format: "%02x", $0) }.joined() }
+    init?(hexString: String) {
+        let chars = Array(hexString.utf8)
+        guard chars.count % 2 == 0 else { return nil }
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(chars.count / 2)
+        var i = 0
+        while i < chars.count {
+            guard let b = UInt8(String(decoding: chars[i..<i + 2], as: UTF8.self), radix: 16) else { return nil }
+            bytes.append(b)
+            i += 2
+        }
+        self.init(bytes)
+    }
 }

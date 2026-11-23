@@ -74,7 +74,7 @@ struct RemoteView: View {
                     header
                     if !car.demoMode && !car.hasKey { keyMissingCard }
                     ActiveAlertsStrip()
-                    StatusCard(link: car.link, status: car.status, demo: car.demoMode)
+                    StatusCard(link: car.link, status: car.status, demo: car.demoMode, checkIn: car.cellular?.checkIn)
                     StartButton(status: car.status,
                                 busy: car.pending == .start || car.pending == .stop,
                                 enabled: ready,
@@ -202,6 +202,7 @@ struct StatusCard: View {
     let link: LinkState
     let status: CarStatus
     let demo: Bool
+    var checkIn: Date? = nil
 
     var body: some View {
         HStack(spacing: 14) {
@@ -227,16 +228,16 @@ struct StatusCard: View {
     private var icon: String {
         switch link {
         case .bluetoothOff, .unauthorized: return "exclamationmark.triangle.fill"
-        case .searching, .connecting: return "antenna.radiowaves.left.and.right"
-        case .ready, .demo: return status.engineRunning ? "engine.combustion.fill" : "car.fill"
+        case .searching, .connecting, .cellularWaiting: return "antenna.radiowaves.left.and.right"
+        case .ready, .demo, .cellular: return status.engineRunning ? "engine.combustion.fill" : "car.fill"
         }
     }
 
     private var tint: Color {
         switch link {
         case .bluetoothOff, .unauthorized: return .yellow
-        case .searching, .connecting: return .secondary
-        case .ready, .demo: return status.engineRunning ? Palette.accent : Palette.good
+        case .searching, .connecting, .cellularWaiting: return .secondary
+        case .ready, .demo, .cellular: return status.engineRunning ? Palette.accent : Palette.good
         }
     }
 
@@ -246,7 +247,8 @@ struct StatusCard: View {
         case .unauthorized: return "Bluetooth isn't allowed"
         case .searching: return "Looking for your car…"
         case .connecting: return "Connecting…"
-        case .ready, .demo:
+        case .cellularWaiting: return "Waiting for your car…"
+        case .ready, .demo, .cellular:
             guard status.engineRunning else { return "Engine is off" }
             if status.secondsRemaining > 0 {
                 return "Running · \(status.secondsRemaining / 60) min left"
@@ -261,6 +263,10 @@ struct StatusCard: View {
         case .unauthorized: return "Allow Bluetooth for Ember in iPhone Settings."
         case .searching: return "Stay within about 30 feet of the car."
         case .connecting: return "This takes a few seconds."
+        case .cellularWaiting: return "It checks in over cellular about once a minute. Make sure it has signal."
+        case .cellular:
+            guard let checkIn else { return "Connected via cellular." }
+            return "Connected via cellular · checked in \(checkIn.formatted(.relative(presentation: .named)))."
         case .ready, .demo:
             let mode = demo ? "Demo car, not connected to a real one." : "Connected to your car."
             return mode

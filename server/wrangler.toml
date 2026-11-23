@@ -1,0 +1,13 @@
+# Ember relay server — Cloudflare Workers (free plan).
+# Deployed automatically by .github/workflows/deploy-server.yml.
+name = "ember-relay"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "CARS"
+class_name = "CarMailbox"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CarMailbox"]

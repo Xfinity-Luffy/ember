@@ -33,6 +33,7 @@ final class BLETransport: NSObject, CarTransport {
     var onStatus: ((CarStatus) -> Void)?
     var onError: ((String) -> Void)?
     var onVehicle: ((VehicleInfo) -> Void)?
+    var onCellular: ((CellularUpdate) -> Void)?   // not used over Bluetooth
 
     private let secret: () -> SymmetricKey?
     private var central: CBCentralManager?

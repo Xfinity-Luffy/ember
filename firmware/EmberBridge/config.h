@@ -90,3 +90,27 @@
 
 // The bridge only asks the car for data while it's awake (engine running, or
 // other traffic seen on the bus), so it never keeps a parked car's modules up.
+
+// ---------------------------------------------------------------------------
+//  Optional LTE + GPS (Cellular / Automatic connection in the app).
+//  Adds a SIM7080G cellular + GPS module so the car can report its location
+//  and take commands from anywhere, through your relay server (see README).
+//  Leave LTE_ENABLED at 0 for Bluetooth only.
+// ---------------------------------------------------------------------------
+#define LTE_ENABLED          0
+
+#define RELAY_HOST           "ember-relay.YOUR-SUBDOMAIN.workers.dev"  // your relay server's address (no https://)
+#define LTE_APN              "hologram"   // your SIM provider's APN (from their setup page)
+#define LTE_RAT              1            // 1 = LTE-M (Cat-M), 2 = NB-IoT, 3 = both
+
+#define PIN_MODEM_TX         19   // ESP32 TX  -> modem RXD
+#define PIN_MODEM_RX         34   // ESP32 RX  <- modem TXD (input-only pin is fine)
+#define PIN_MODEM_PWRKEY     23   // pulses the modem's power key (-1 if your module powers on by itself)
+#define MODEM_PWRKEY_ACTIVE  HIGH // most breakout boards: HIGH presses the key; bare modules: LOW
+
+// How often the car checks in. Commands sent from the app over cellular are
+// picked up at the next check-in, so shorter = snappier but more data/battery.
+#define PARKED_REPORT_SECONDS  60   // parked
+#define MOVING_REPORT_SECONDS  20   // driving
+#define FAST_REPORT_SECONDS    8    // for 2 minutes after the app asks (map open, command sent)
+#define GNSS_PARKED_MINUTES    10   // refresh GPS this often while parked

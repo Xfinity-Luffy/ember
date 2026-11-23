@@ -1,0 +1,62 @@
+# Tests the relay server, then deploys it to your Cloudflare account.
+# Only needed for the optional Cellular connection.
+#
+# One-time setup (README, "Cellular"):
+#   GitHub repo > Settings > Secrets and variables > Actions > New repository secret
+#     CLOUDFLARE_API_TOKEN   (Cloudflare token from the "Edit Cloudflare Workers" template)
+#     CLOUDFLARE_ACCOUNT_ID  (shown on your Cloudflare dashboard)
+# Then: Actions > "Deploy relay server" > Run workflow.
+# Without those secrets it only runs the tests and skips the deploy.
+
+name: Deploy relay server
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "server/**"
+      - ".github/workflows/deploy-server.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test the server
+        run: node server/test/relay.test.mjs
+
+      - name: Deploy to Cloudflare
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
+        working-directory: server
+        run: npx --yes wrangler@4 deploy 2>&1 | tee deploy.log
+
+      - name: Show your relay address
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
+        working-directory: server
+        run: |
+          URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          echo "## Relay server deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Address for the app (Settings › Relay server) and for RELAY_HOST in config.h:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${URL#https://}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Relay address: ${URL#https://}"
+
+      - name: Explain the skipped deploy
+        if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == ''
+        run: |
+          echo "## Tests passed, deploy skipped" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Add the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets to deploy (see README, Cellular)." >> "$GITHUB_STEP_SUMMARY"

@@ -11,17 +11,32 @@ struct LocationView: View {
 
     @State private var position: MapCameraPosition = .automatic
 
-    /// The car to show: a pretend spot near you in demo mode, otherwise the saved spot.
+    /// The car's own GPS position over cellular, if it's newer than the phone's saved spot.
+    private var cellularFix: (coordinate: CLLocationCoordinate2D, time: Date, speedKmh: Double)? {
+        guard !car.demoMode, let c = car.cellular, let lat = c.latitude, let lon = c.longitude else { return nil }
+        let time = c.fixTime ?? c.checkIn
+        if let saved = locator.carSpot, car.link == .ready || saved.time > time { return nil }
+        return (CLLocationCoordinate2D(latitude: lat, longitude: lon), time, c.speedKmh ?? 0)
+    }
+
+    /// The car to show: a pretend spot near you in demo mode, the car's cellular
+    /// GPS when that's newest, otherwise the spot saved by this phone.
     private var spot: CLLocationCoordinate2D? {
         if car.demoMode {
             let base = locator.me?.coordinate ?? CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194)
             return CLLocationCoordinate2D(latitude: base.latitude + 0.0011, longitude: base.longitude + 0.0009)
         }
-        return locator.carSpot?.coordinate
+        return cellularFix?.coordinate ?? locator.carSpot?.coordinate
     }
 
-    /// Live = the app is connected to the bridge right now, so the phone is at the car.
-    private var live: Bool { car.demoMode || car.link == .ready }
+    /// Live = connected over Bluetooth (phone is at the car), or a fresh cellular GPS fix.
+    private var live: Bool {
+        if car.demoMode || car.link == .ready { return true }
+        if let fix = cellularFix { return Date().timeIntervalSince(fix.time) < 120 }
+        return false
+    }
+
+    private var moving: Bool { (cellularFix?.speedKmh ?? 0) > 5 }
 
     var body: some View {
         ZStack {
@@ -77,7 +92,7 @@ struct LocationView: View {
                 Circle()
                     .fill(live ? Palette.good : Color.secondary)
                     .frame(width: 8, height: 8)
-                Text(live ? (car.demoMode ? "Live · demo" : "Live") : "Last seen")
+                Text(live ? (car.demoMode ? "Live · demo" : (cellularFix != nil ? "Live · cellular" : "Live")) : "Last seen")
                     .font(.caption.weight(.semibold))
             }
             .padding(.horizontal, 10)
@@ -162,13 +177,22 @@ struct LocationView: View {
 
     private var title: String {
         if spot == nil { return "No location yet" }
-        if live { return car.demoMode ? "Demo car is nearby" : "You're at your car" }
+        if car.demoMode { return "Demo car is nearby" }
+        if car.link == .ready { return "You're at your car" }
+        if moving { return "Your car is moving" }
+        if cellularFix != nil { return live ? "Your car, live over cellular" : "Your car's last GPS position" }
         return "Your car is parked"
     }
 
     private var subtitle: String {
         if spot == nil { return "Open the app near your car once and its spot is saved automatically." }
         if car.demoMode { return "Pretend spot near you." }
+        if let fix = cellularFix {
+            let speed = Measurement(value: fix.speedKmh, unit: UnitSpeed.kilometersPerHour)
+                .formatted(.measurement(width: .abbreviated, usage: .general, numberFormatStyle: .number.precision(.fractionLength(0))))
+            let when = fix.time.formatted(.relative(presentation: .named))
+            return moving ? "\(speed) · updated \(when)" : "From the car's GPS · \(when)"
+        }
         let place = locator.address ?? "Location saved"
         if live { return "\(place) · updating live" }
         if let time = locator.carSpot?.time {
@@ -188,9 +212,11 @@ struct LocationView: View {
     }
 
     private var footnote: String {
-        car.demoMode
-            ? "Turn off demo mode to save your real car's spot."
-            : "Updates live while the app is connected to your car. After you walk away, it keeps the last spot. It stays on this iPhone."
+        if car.demoMode { return "Turn off demo mode to save your real car's spot." }
+        if car.connectionMode != .bluetooth {
+            return "Over cellular, the car sends its GPS position about once a minute when parked, every 20 seconds when driving, and every few seconds while this screen is open."
+        }
+        return "Updates live while the app is connected to your car. After you walk away, it keeps the last spot. It stays on this iPhone."
     }
 
     private func showCar() {
